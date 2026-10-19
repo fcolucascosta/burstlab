@@ -13,7 +13,7 @@ struct ContentView: View {
             #endif
             VStack(spacing: 12) {
                 HStack {
-                    Text("BurstLab 0.1.0")
+                    Text("BurstLab 0.1.1")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)

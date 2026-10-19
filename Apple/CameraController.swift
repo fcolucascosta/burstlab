@@ -83,7 +83,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func capturePhoto() {
         sessionQueue.async {
-            guard self.configured, !self.probeActive else {
+            guard self.configured, self.session.isRunning, !self.probeActive else {
                 DispatchQueue.main.async { self.status = "Sessao de camera indisponivel." }
                 return
             }
@@ -115,6 +115,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             return
         }
         session.addOutput(photoOutput)
+        photoOutput.maxPhotoQualityPrioritization = .quality
         session.commitConfiguration()
         configured = true
     }
@@ -165,7 +166,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func probeRawBurst() {
         sessionQueue.async {
-            guard self.configured, !self.probeActive else { return }
+            guard self.configured, self.session.isRunning, !self.probeActive else { return }
             guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
                 DispatchQueue.main.async { self.rawProbeReport = "Nenhum formato RAW disponivel neste aparelho." }
                 return
