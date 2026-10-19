@@ -22,7 +22,7 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 
 **Limites que mandam no projeto**:
 - Camera unica de 12 MP: sem ultrawide/tele; SR apenas digital via burst.
-- 4 GB de RAM: o pico de memoria deve ficar bem abaixo do limite de Jetsam. Contas: RAW 12 MP 16 bpp = 4032 x 3024 x 2 = ~23,3 MB/frame; 8 frames ~186 MB; orcamento alvo de trabalho ~256-512 MB.
+- 4 GB de RAM: o pico de memoria deve ficar bem abaixo do limite de Jetsam. Contas medidas: RAW 12 MP em container de 16 bits = 4032 x 3024 x 2 = 24.385.536 bytes (~24,4 MB/frame); 8 frames ~195 MB; 16 frames ~390 MB. Acumulador UInt32 full-res = 48,8 MB; orcamento alvo de trabalho ~150 MB por burst de 8.
 - Processar por tiles no Metal, alinhar em resolucao reduzida (ex. 1/4) e aplicar warp em tiles full-res.
 - Termica num corpo pequeno: bursts curtos e limites de frames por modo.
 - Exposicao maxima de 0,5 s por frame (medida): Night soma mais frames, nao frames de 1 s.
@@ -46,16 +46,23 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 ## Respostas da sonda no SE 2022 (2026-10-19)
 
 - **RAW Bayer: sim.** Formato `rgg4` (14-bit Bayer RGGB), buffer unico de 4032 x 3024. O risco principal da F1 esta eliminado.
-- **Exposicao maxima: 0,5 s** por frame no formato ativo (a minima aparece como 0.0000s com 4 casas; corrigido para 6 casas na proxima build). O Night do Indigo usa ate 1 s por frame; no SE vamos somar mais frames (32 x 0,5 s = 16 s de integracao maxima).
+- **Exposicao maxima: 0,5 s** por frame no formato ativo (a minima aparece como 0.000020s a 0.500000s desde a build 0.1.1). O Night do Indigo usa ate 1 s por frame; no SE vamos somar mais frames (32 x 0,5 s = 16 s de integracao maxima).
 - **ISO: 22-2112** no formato processado ativo; o formato RAW pode ter faixa diferente (medir na sonda de burst).
 - **Memoria fisica: 3,79 GB**, confirmando o orcamento conservador de frames.
 - **Formatos processados**: 420f, 420v, BGRA.
 
+### Resultados da sonda de burst RAW (2026-10-19)
+
+- **Taxa: 17,0 fps** (8 frames em 0,47 s). Primeiro frame 103,2 ms (aquecimento); seguintes 49,8-53,7 ms (~18,6-20,0 fps instantaneos). Buffer 4032x3024, 8064 B/linha (16 bits/pixel), FourCC `rgg4`.
+- **Niveis no frame 1 (amostragem 1/64)**: min ~1942-1999, media 2304, max 11134-12962 (variacao entre frames). A media constante em 2304 sugere pedesta-lo de preto fixo; falta confirmar no histograma completo.
+- **Termica**: nominal ao final de 8 frames.
+- **Dados iniciais de alinhamento**: os maximos incluem valores impares (ex. 11819, 12505), o que descarta 14 bits alinhados a esquerda (2 bits baixos sempre zero). Tudo indica **alinhado a direita**, com pedesta-lo de preto perto de 2000-2048 DN; o histograma completo da 0.1.2 confirma a moda exata e a saturacao.
+
 ### Ainda em aberto
 
-- Taxa real de burst RAW em 12 MP no A15 (medida pela sonda de burst, F1.5).
-- Faixa de ISO/exposicao do formato RAW e nivel de preto/saturacao (estatisticas da sonda de burst).
-- Custo termico de bursts de 8-16 frames.
+- Nivel de preto/saturacao, alinhamento de bits e padrao CFA exatos (analise de frame inteiro na 0.1.2).
+- Custo termico de bursts de 16-32 frames.
+- Faixa de ISO/exposicao do formato RAW (a sonda atual reporta a do formato ativo).
 
 ## Referencias
 

@@ -51,6 +51,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var probeLines: [String] = []
     private var probeStart: CFTimeInterval = 0
     private var probeIntervalStart: CFTimeInterval?
+    private var calibrationBuffer: CVPixelBuffer?
 
     func start() {
         #if targetEnvironment(simulator)
@@ -207,6 +208,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let now = CFAbsoluteTimeGetCurrent()
         let interval = now - (probeIntervalStart ?? probeStart)
         probeIntervalStart = now
+        if frameNumber == 1 { calibrationBuffer = pixelBuffer }
 
         CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
@@ -247,6 +249,73 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    private static func analyzeRaw(_ pixelBuffer: CVPixelBuffer) -> String {
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer), rowBytes >= width * 2 else {
+            return "Calibracao RAW: buffer indisponivel."
+        }
+        var histogram = [Int](repeating: 0, count: 65536)
+        var phaseTotal = [Double](repeating: 0, count: 4)
+        var phaseCount = [Int](repeating: 0, count: 4)
+        var twoBitViolations = 0
+        var fourBitViolations = 0
+        var minimum = 65535
+        var maximum = 0
+        for y in 0..<height {
+            let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
+            let phaseRow = (y & 1) << 1
+            for x in 0..<width {
+                let value = Int(row[x])
+                histogram[value] += 1
+                let phase = phaseRow | (x & 1)
+                phaseTotal[phase] += Double(value)
+                phaseCount[phase] += 1
+                if value & 0x3 != 0 { twoBitViolations += 1 }
+                if value & 0xF != 0 { fourBitViolations += 1 }
+                if value < minimum { minimum = value }
+                if value > maximum { maximum = value }
+            }
+        }
+        let samples = width * height
+        func percentile(_ fraction: Double) -> Int {
+            let target = Int(Double(samples) * fraction)
+            var accumulated = 0
+            for value in 0..<65536 {
+                accumulated += histogram[value]
+                if accumulated >= target { return value }
+            }
+            return 65535
+        }
+        let modes = histogram.enumerated().sorted { $0.element > $1.element }.prefix(4)
+        let modeText = modes.map { String(format: "%d(%d)", $0.offset, $0.element) }.joined(separator: " ")
+        let alignment: String
+        if twoBitViolations == 0 {
+            alignment = "14 bits a esquerda (real = bruto >> 2)"
+        } else if fourBitViolations == 0 {
+            alignment = "12 bits a esquerda (real = bruto >> 4)"
+        } else {
+            alignment = "alinhado a direita"
+        }
+        let phases = ["R(0,0)", "G(1,0)", "G(0,1)", "B(1,1)"]
+        let phaseText = (0..<4).map { index in
+            let mean = phaseCount[index] > 0 ? phaseTotal[index] / Double(phaseCount[index]) : 0
+            return String(format: "%@ %.0f", phases[index], mean)
+        }.joined(separator: " ")
+        return [
+            "Calibracao RAW (frame 1, frame inteiro):",
+            String(format: "  min %d max %d | P0.01 %d P0.1 %d P1 %d P50 %d P99 %d P99.9 %d P99.99 %d",
+                   minimum, maximum, percentile(0.0001), percentile(0.001), percentile(0.01),
+                   percentile(0.5), percentile(0.99), percentile(0.999), percentile(0.9999)),
+            "  top valores: \(modeText)",
+            "  bits baixos: \(alignment) | violacoes 2 bits \(twoBitViolations) | 4 bits \(fourBitViolations)",
+            "  CFA RGGB: \(phaseText)"
+        ].joined(separator: "\n")
+    }
+
     private func finishRawProbe(status: String) {
         let elapsed = CFAbsoluteTimeGetCurrent() - probeStart
         let validFrames = probeLines.filter { $0.hasPrefix("Frame ") && !$0.contains("erro") }.count
@@ -256,6 +325,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             "Termica ao final: \(CameraController.thermalStateName(ProcessInfo.processInfo.thermalState))"
         ]
         lines.append(contentsOf: probeLines)
+        if let buffer = calibrationBuffer {
+            lines.append(CameraController.analyzeRaw(buffer))
+            calibrationBuffer = nil
+        }
         let report = lines.joined(separator: "\n")
         probeActive = false
         DispatchQueue.main.async {
