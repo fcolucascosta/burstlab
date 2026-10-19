@@ -5,5 +5,6 @@
 - Evidencia: distinguir evidencia estatica, build e efeito fisico medido. Nao afirmar qualidade de captura, merge ou look sem medicao no aparelho.
 - Preservar os checks de empacotamento (arm64 de device, bundle unsigned, sem mobileprovision).
 - Relatorios locais ficam em `reports/` (ignorado pelo git).
+- Artefatos: `BurstLab-<versao>-unsigned.ipa` e `BurstLab-<versao>-build.json`; manter versoes antigas em `build/dist`.
 - Metodologia: uma mudanca por vez, com readback e reversao documentada (padrao hy300-lab).
 - Nomes: app/repo BurstLab; bundle `dev.lucas.burstlab.ios`.

@@ -45,11 +45,21 @@ def inspect_device_executable(path):
     return {"architecture": "arm64", "platform": "iPhoneOS", "code_signature": False}
 
 
-def package(app, output):
+def ipa_name(info):
+    return f"BurstLab-{info['CFBundleShortVersionString']}-unsigned.ipa"
+
+
+def manifest_name(info):
+    return f"BurstLab-{info['CFBundleShortVersionString']}-build.json"
+
+
+def package(app, output=None):
     app = app.resolve()
     if app.suffix != ".app" or not app.is_dir():
         raise ValueError("Input must be an Xcode .app bundle")
     info = plistlib.loads((app / "Info.plist").read_bytes())
+    if output is None:
+        output = Path("build/dist") / ipa_name(info)
     executable_name = info["CFBundleExecutable"]
     if Path(executable_name).name != executable_name:
         raise ValueError("CFBundleExecutable must name a file inside the bundle")
@@ -84,12 +94,12 @@ def package(app, output):
         "ipa_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "installation": "Must be signed locally before installation on iPhone",
         "scope": (
-            "iPhone only. F1: capability probe (RAW/processed formats, ISO, exposure, memory) plus single JPEG capture "
-            "saved to Photos. The burst pipeline (alignment, merge, night, long exposure, look) is not implemented yet; "
-            "see docs/roadmap.md. RAW availability on iPhone SE 2022 is still unverified on hardware."
+            "iPhone only. F1: capability probe (RAW confirmed: rgg4 14-bit RGGB on iPhone SE 2022) plus single JPEG capture; "
+            "F1.5: RAW burst probe with timing and level statistics. The burst pipeline (alignment, merge, night, long "
+            "exposure, look) is not implemented yet; see docs/roadmap.md."
         ),
     }
-    manifest_path = output.with_name("BurstLab-build.json")
+    manifest_path = output.with_name(manifest_name(info))
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     print(f"Unsigned device IPA: {output}")
     print(f"Build manifest: {manifest_path}")
@@ -98,6 +108,6 @@ def package(app, output):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("app", type=Path)
-    parser.add_argument("--output", type=Path, default=Path("build/dist/BurstLab-unsigned.ipa"))
+    parser.add_argument("--output", type=Path, help="Defaults to build/dist/BurstLab-<version>-unsigned.ipa")
     args = parser.parse_args()
     package(args.app, args.output)

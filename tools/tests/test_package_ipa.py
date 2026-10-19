@@ -58,9 +58,14 @@ class IPAPackageTests(unittest.TestCase):
         with zipfile.ZipFile(output) as archive:
             self.assertEqual(set(archive.namelist()), {"Payload/BurstLab.app/BurstLab", "Payload/BurstLab.app/Info.plist"})
             self.assertEqual(archive.read("Payload/BurstLab.app/BurstLab"), macho())
-        manifest = json.loads((output.parent / "BurstLab-build.json").read_text())
+        manifest = json.loads((output.parent / "BurstLab-0.1.0-build.json").read_text())
         self.assertEqual(manifest["binary"]["platform"], "iPhoneOS")
         self.assertEqual(len(manifest["ipa_sha256"]), 64)
+
+    def test_default_package_names_include_version(self):
+        info = {"CFBundleShortVersionString": "1.4.2"}
+        self.assertEqual(packager.ipa_name(info), "BurstLab-1.4.2-unsigned.ipa")
+        self.assertEqual(packager.manifest_name(info), "BurstLab-1.4.2-build.json")
 
 
 if __name__ == "__main__":

@@ -19,5 +19,4 @@ xcodebuild \
   build
 
 python3 "$project_root/tools/package_ipa.py" \
-  "$build_dir/DerivedData/Build/Products/Release-iphoneos/BurstLab-iOS.app" \
-  --output "$project_root/build/dist/BurstLab-unsigned.ipa"
+  "$build_dir/DerivedData/Build/Products/Release-iphoneos/BurstLab-iOS.app"

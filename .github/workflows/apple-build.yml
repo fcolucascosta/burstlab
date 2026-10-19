@@ -48,7 +48,7 @@ jobs:
         with:
           name: BurstLab-iPhone-unsigned
           path: |
-            build/dist/BurstLab-unsigned.ipa
-            build/dist/BurstLab-build.json
+            build/dist/BurstLab-*-unsigned.ipa
+            build/dist/BurstLab-*-build.json
           if-no-files-found: error
           retention-days: 7
