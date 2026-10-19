@@ -232,10 +232,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             let mean = count > 0 ? Double(total) / Double(count) : 0
             range = String(format: "min %u media %.0f max %u", minimum, mean, maximum)
         }
-        let exposure = CMTimeGetSeconds(photo.resolvedSettings.exposureDuration)
         probeLines.append(String(
-            format: "Frame %d: %.1f ms, exp %.6fs, %dx%d, %d B/linha, FourCC %@, %@",
-            frameNumber, interval * 1000, exposure, width, height, rowBytes,
+            format: "Frame %d: %.1f ms, %dx%d, %d B/linha, FourCC %@, %@",
+            frameNumber, interval * 1000, width, height, rowBytes,
             CameraController.fourCC(format), range
         ))
 
