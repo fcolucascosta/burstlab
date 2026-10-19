@@ -56,7 +56,9 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 - **Taxa: 17,0 fps** (8 frames em 0,47 s). Primeiro frame 103,2 ms (aquecimento); seguintes 49,8-53,7 ms (~18,6-20,0 fps instantaneos). Buffer 4032x3024, 8064 B/linha (16 bits/pixel), FourCC `rgg4`.
 - **Niveis no frame 1 (amostragem 1/64)**: min ~1942-1999, media 2304, max 11134-12962 (variacao entre frames). A media constante em 2304 sugere pedesta-lo de preto fixo; falta confirmar no histograma completo.
 - **Termica**: nominal ao final de 8 frames.
-- **Dados iniciais de alinhamento**: os maximos incluem valores impares (ex. 11819, 12505), o que descarta 14 bits alinhados a esquerda (2 bits baixos sempre zero). Tudo indica **alinhado a direita**, com pedesta-lo de preto perto de 2000-2048 DN; o histograma completo da 0.1.2 confirma a moda exata e a saturacao.
+- **Alinhamento confirmado**: 14 bits **alinhados a direita** (9,26M de violacoes nos 2 bits baixos), branco **16383** (P99.99 estoura), CFA **RGGB** (G1 = G2 = 2211).
+- **Preto confirmado**: frame escuro com as 4 fases CFA em **2112** (528 << 2) e mediana 2114; ruido de leitura ~+-57 DN (P1-P99). Faixa util: 2112-16383.
+- **Taxa (2a rodada)**: 20,6 fps em cena clara (8 frames/0,39 s); no escuro, 37-48 ms/frame em regime (~21-27 fps). O primeiro frame pode levar 1,5 s de warm-up.
 
 ### Ainda em aberto
 

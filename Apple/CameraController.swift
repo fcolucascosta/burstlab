@@ -39,11 +39,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var isConfigured = false
     @Published var isProbingRaw = false
     @Published var rawProbeReport: String?
+    @Published var isCapturingBurst = false
 
     let session = AVCaptureSession()
 
     private let photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "dev.lucas.burstlab.session")
+    private let processingQueue = DispatchQueue(label: "dev.lucas.burstlab.processing", qos: .userInitiated)
     private var photoDevice: AVCaptureDevice?
     private var configured = false
     private var probeActive = false
@@ -52,6 +54,12 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var probeStart: CFTimeInterval = 0
     private var probeIntervalStart: CFTimeInterval?
     private var calibrationBuffer: CVPixelBuffer?
+    private var burstActive = false
+    private var burstFrames: [CVPixelBuffer] = []
+    private var burstRemaining = 0
+    private var burstFormat: OSType = 0
+    private var burstStart: CFTimeInterval = 0
+    private var burstConfig = BurstConfig.defaults(for: .photo)
 
     func start() {
         #if targetEnvironment(simulator)
@@ -84,7 +92,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func capturePhoto() {
         sessionQueue.async {
-            guard self.configured, self.session.isRunning, !self.probeActive else {
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else {
                 DispatchQueue.main.async { self.status = "Sessao de camera indisponivel." }
                 return
             }
@@ -167,7 +175,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func probeRawBurst() {
         sessionQueue.async {
-            guard self.configured, self.session.isRunning, !self.probeActive else { return }
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else { return }
             guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
                 DispatchQueue.main.async { self.rawProbeReport = "Nenhum formato RAW disponivel neste aparelho." }
                 return
@@ -338,6 +346,163 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    func captureBurst() {
+        sessionQueue.async {
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else { return }
+            guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
+                DispatchQueue.main.async { self.lastCaptureNote = "RAW indisponivel para o burst." }
+                return
+            }
+            guard let device = self.photoDevice else { return }
+            self.burstConfig = BurstConfig.defaults(for: .photo)
+            self.burstActive = true
+            self.burstFormat = rawFormat
+            self.burstFrames.removeAll()
+            self.burstRemaining = self.burstConfig.frameCount
+            self.burstStart = CFAbsoluteTimeGetCurrent()
+            DispatchQueue.main.async {
+                self.isCapturingBurst = true
+                self.status = "Burst: travando exposicao..."
+                self.lastCaptureNote = ""
+            }
+            do {
+                try device.lockForConfiguration()
+                let factor = pow(2.0, self.burstConfig.underExposureEV)
+                let scaled = CMTimeMultiplyByFloat64(device.exposureDuration, multiplier: factor)
+                let duration = CMTimeMaximum(CMTimeMinimum(scaled, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
+                let iso = min(max(device.iso, device.activeFormat.minISO), device.activeFormat.maxISO)
+                if device.isFocusModeSupported(.locked) {
+                    device.focusMode = .locked
+                }
+                let canCustom = device.isExposureModeSupported(.custom)
+                if canCustom {
+                    device.setExposureModeCustom(duration: duration, iso: iso) { _ in
+                        self.sessionQueue.async { self.captureBurstFrame() }
+                    }
+                } else if device.isExposureModeSupported(.locked) {
+                    device.exposureMode = .locked
+                }
+                device.unlockForConfiguration()
+                if !canCustom {
+                    self.captureBurstFrame()
+                }
+            } catch {
+                self.abortBurst("Falha ao travar exposicao: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private func captureBurstFrame() {
+        guard burstActive, burstRemaining > 0 else { return }
+        let settings = AVCapturePhotoSettings(rawPixelFormatType: burstFormat)
+        settings.photoQualityPrioritization = .speed
+        settings.flashMode = .off
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    private func handleBurstFrame(_ photo: AVCapturePhoto, error: Error?) {
+        guard burstActive else { return }
+        if let error {
+            abortBurst("Burst interrompido: \(error.localizedDescription)")
+            return
+        }
+        guard let pixelBuffer = photo.pixelBuffer else {
+            abortBurst("Burst sem pixel buffer RAW.")
+            return
+        }
+        burstFrames.append(pixelBuffer)
+        burstRemaining -= 1
+        let captured = burstConfig.frameCount - burstRemaining
+        DispatchQueue.main.async { self.lastCaptureNote = "Burst: \(captured)/\(self.burstConfig.frameCount)" }
+        if burstRemaining > 0 {
+            captureBurstFrame()
+        } else {
+            finishBurst()
+        }
+    }
+
+    private func finishBurst() {
+        let frames = burstFrames
+        let config = burstConfig
+        burstFrames.removeAll()
+        burstActive = false
+        restoreCameraModes()
+        DispatchQueue.main.async {
+            self.isCapturingBurst = false
+            self.status = "Processando burst..."
+            self.lastCaptureNote = "Burst: \(frames.count) frames, alinhando e combinando..."
+        }
+        processingQueue.async {
+            do {
+                let result = try BurstProcessor.process(frames: frames, underExposureEV: config.underExposureEV)
+                self.saveBurst(result)
+            } catch {
+                DispatchQueue.main.async {
+                    self.status = "Falha no burst"
+                    self.lastCaptureNote = "Erro: \(error.localizedDescription)"
+                }
+            }
+        }
+    }
+
+    private func restoreCameraModes() {
+        guard let device = photoDevice else { return }
+        do {
+            try device.lockForConfiguration()
+            if device.isExposureModeSupported(.continuousAutoExposure) {
+                device.exposureMode = .continuousAutoExposure
+            }
+            if device.isFocusModeSupported(.continuousAutoFocus) {
+                device.focusMode = .continuousAutoFocus
+            }
+            device.unlockForConfiguration()
+        } catch {
+        }
+    }
+
+    private func abortBurst(_ message: String) {
+        burstActive = false
+        burstFrames.removeAll()
+        restoreCameraModes()
+        DispatchQueue.main.async {
+            self.isCapturingBurst = false
+            self.status = "Burst cancelado"
+            self.lastCaptureNote = message
+        }
+    }
+
+    private func saveBurst(_ result: BurstProcessResult) {
+        let megabytes = Double(result.jpegData.count) / 1_048_576
+        let shifts = result.shifts.dropFirst().map { "(\($0.dx),\($0.dy))" }.joined(separator: " ")
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    self.status = "Burst processado"
+                    self.lastCaptureNote = "Permissao de fototeca negada."
+                }
+                return
+            }
+            PHPhotoLibrary.shared().performChanges {
+                PHAssetCreationRequest.forAsset().addResource(with: .photo, data: result.jpegData, options: nil)
+            } completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        self.status = "Burst pronto"
+                        self.lastCaptureNote = String(
+                            format: "Burst %d frames %dx%d: %.1f MB | proc %.1fs | WB R %.2f | exp %.2f | desloc %@",
+                            result.frameCount, result.width, result.height, megabytes,
+                            result.elapsedSeconds, result.whiteGain, result.exposureScale,
+                            shifts.isEmpty ? "0" : shifts
+                        )
+                    } else {
+                        self.status = "Falha ao salvar"
+                        self.lastCaptureNote = "Burst: \(error?.localizedDescription ?? "erro desconhecido")"
+                    }
+                }
+            }
+        }
+    }
+
     private static func thermalStateName(_ state: ProcessInfo.ThermalState) -> String {
         switch state {
         case .nominal: return "nominal"
@@ -351,6 +516,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if probeActive {
             sessionQueue.async { self.handleRawProbeFrame(photo, error: error) }
+            return
+        }
+        if burstActive {
+            sessionQueue.async { self.handleBurstFrame(photo, error: error) }
             return
         }
         if let error {

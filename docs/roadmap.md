@@ -15,11 +15,11 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 - [x] Primeiro build no GitHub Actions e instalacao pelo iLoader (0.1.0, run 39324304300).
 - [x] Relatorio da sonda no aparelho: RAW `rgg4` (14-bit RGGB) confirmado; exposicao ate 0,5 s; ISO 22-2112; 3,79 GB.
 
-## F1.5 - Sonda de burst RAW (concluida; calibracao em andamento)
+## F1.5 - Sonda de burst RAW (concluida)
 
 - [x] Implementada no app: captura sequencial de 8 frames RAW com tempo por frame, estatisticas de nivel (min/media/max), FourCC, bytes/linha e estado termico.
 - [x] Relatorio no aparelho: 8 frames em 0,47 s (**17,0 fps**), 4032x3024x16 bit (8064 B/linha, 24,4 MB/frame), termica **nominal**, min ~1950-2000 / media 2304 / max 11,1-13,0k.
-- [ ] Calibracao do frame inteiro (build 0.1.2): histograma completo, percentis, modas (nivel de preto), saturacao, alinhamento de bits e medias por fase CFA.
+- [x] Calibracao do frame inteiro (0.1.2): 14 bits alinhados a direita, branco **16383**, preto **2112**, CFA **RGGB**, faixa util 14271 DN.
 
 **Criterio de aceite**: taxa de burst e comportamento termico atendidos (17 fps; nominal). O numero de frames do F2 parte de 8-12 e testa 16.
 

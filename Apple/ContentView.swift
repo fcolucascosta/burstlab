@@ -13,7 +13,7 @@ struct ContentView: View {
             #endif
             VStack(spacing: 12) {
                 HStack {
-                    Text("BurstLab 0.1.2")
+                    Text("BurstLab 0.2.0")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
@@ -40,6 +40,17 @@ struct ContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
                 Button {
+                    camera.captureBurst()
+                } label: {
+                    Text(camera.isCapturingBurst ? "Burst em andamento..." : "Foto burst (8 RAW)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                }
+                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
+                Button {
                     camera.probeRawBurst()
                 } label: {
                     Text(camera.isProbingRaw ? "Sondando RAW..." : "Sonda burst RAW (8 frames)")
@@ -49,7 +60,7 @@ struct ContentView: View {
                         .padding(.vertical, 8)
                         .background(.black.opacity(0.55), in: Capsule())
                 }
-                .disabled(!camera.isConfigured || camera.isProbingRaw)
+                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
                 Button {
                     camera.capturePhoto()
                 } label: {
@@ -58,7 +69,7 @@ struct ContentView: View {
                         Circle().fill(.white).frame(width: 62, height: 62)
                     }
                 }
-                .disabled(!camera.isConfigured)
+                .disabled(!camera.isConfigured || camera.isCapturingBurst)
                 .opacity(camera.isConfigured ? 1 : 0.4)
                 .accessibilityLabel("Capturar foto")
             }
