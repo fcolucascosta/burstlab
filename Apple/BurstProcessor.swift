@@ -2,6 +2,13 @@ import AVFoundation
 import Foundation
 import UIKit
 
+struct BurstFrame {
+    let width: Int
+    let height: Int
+    let bytesPerRow: Int
+    let data: Data
+}
+
 struct BurstProcessResult {
     let jpegData: Data
     let width: Int
@@ -39,10 +46,10 @@ enum BurstProcessor {
         }
     }
 
-    static func process(frames: [CVPixelBuffer], underExposureEV: Double) throws -> BurstProcessResult {
+    static func process(frames: [BurstFrame], underExposureEV: Double) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
-        let width = CVPixelBufferGetWidth(reference)
-        let height = CVPixelBufferGetHeight(reference)
+        let width = reference.width
+        let height = reference.height
         guard width > 1, height > 1 else { throw BurstError.invalidDimensions }
 
         let started = CFAbsoluteTimeGetCurrent()
@@ -252,7 +259,7 @@ enum BurstProcessor {
         return lut
     }
 
-    private static func estimateShift(reference: CVPixelBuffer, frame: CVPixelBuffer) -> Shift {
+    private static func estimateShift(reference: BurstFrame, frame: BurstFrame) -> Shift {
         guard let referenceProfiles = profiles(for: reference),
               let frameProfiles = profiles(for: frame) else {
             return Shift(dx: 0, dy: 0)
@@ -262,43 +269,44 @@ enum BurstProcessor {
         return Shift(dx: (dx / 2) * 2, dy: (dy / 2) * 2)
     }
 
-    private static func profiles(for buffer: CVPixelBuffer) -> (rows: [Float], columns: [Float])? {
-        CVPixelBufferLockBaseAddress(buffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
-        let width = CVPixelBufferGetWidth(buffer)
-        let height = CVPixelBufferGetHeight(buffer)
-        let rowBytes = CVPixelBufferGetBytesPerRow(buffer)
-        guard let base = CVPixelBufferGetBaseAddress(buffer), rowBytes >= width * 2 else { return nil }
+    private static func profiles(for frame: BurstFrame) -> (rows: [Float], columns: [Float])? {
+        let width = frame.width
+        let height = frame.height
+        let rowBytes = frame.bytesPerRow
+        guard rowBytes >= width * 2 else { return nil }
+        return frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> (rows: [Float], columns: [Float])? in
+            guard let base = raw.baseAddress else { return nil }
 
-        var rowSums = [UInt64](repeating: 0, count: height)
-        var rowCounts = [UInt32](repeating: 0, count: height)
-        for y in 0..<height {
-            let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
+            var rowSums = [UInt64](repeating: 0, count: height)
+            var rowCounts = [UInt32](repeating: 0, count: height)
+            for y in 0..<height {
+                let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
+                var x = 0
+                while x < width {
+                    rowSums[y] += UInt64(row[x])
+                    rowCounts[y] += 1
+                    x += 8
+                }
+            }
+
+            var columnSums = [UInt64](repeating: 0, count: width)
+            var columnCounts = [UInt32](repeating: 0, count: width)
             var x = 0
             while x < width {
-                rowSums[y] += UInt64(row[x])
-                rowCounts[y] += 1
+                var y = 0
+                while y < height {
+                    let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
+                    columnSums[x] += UInt64(row[x])
+                    columnCounts[x] += 1
+                    y += 8
+                }
                 x += 8
             }
-        }
 
-        var columnSums = [UInt64](repeating: 0, count: width)
-        var columnCounts = [UInt32](repeating: 0, count: width)
-        var x = 0
-        while x < width {
-            var y = 0
-            while y < height {
-                let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
-                columnSums[x] += UInt64(row[x])
-                columnCounts[x] += 1
-                y += 8
-            }
-            x += 8
+            let rows = (0..<height).map { Float(rowSums[$0]) / Float(max(rowCounts[$0], 1)) }
+            let columns = (0..<width).map { Float(columnSums[$0]) / Float(max(columnCounts[$0], 1)) }
+            return (rows, columns)
         }
-
-        let rows = (0..<height).map { Float(rowSums[$0]) / Float(max(rowCounts[$0], 1)) }
-        let columns = (0..<width).map { Float(columnSums[$0]) / Float(max(columnCounts[$0], 1)) }
-        return (rows, columns)
     }
 
     private static func bestShift(_ reference: [Float], _ current: [Float], maxShift: Int) -> Int {
@@ -327,32 +335,33 @@ enum BurstProcessor {
     }
 
     private static func accumulate(
-        frame: CVPixelBuffer,
+        frame: BurstFrame,
         into sums: UnsafeMutablePointer<UInt32>,
         counts: UnsafeMutablePointer<UInt8>,
         width: Int,
         height: Int,
         shift: Shift
     ) {
-        CVPixelBufferLockBaseAddress(frame, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(frame, .readOnly) }
-        let rowBytes = CVPixelBufferGetBytesPerRow(frame)
-        guard let base = CVPixelBufferGetBaseAddress(frame), rowBytes >= width * 2 else { return }
-        let yStart = max(0, -shift.dy)
-        let yEnd = min(height, height - shift.dy)
-        let xStart = max(0, -shift.dx)
-        let xEnd = min(width, width - shift.dx)
-        guard xStart < xEnd, yStart < yEnd else { return }
-        for y in yStart..<yEnd {
-            let source = base.advanced(by: (y + shift.dy) * rowBytes).assumingMemoryBound(to: UInt16.self)
-            let destination = y * width
-            var x = xStart
-            while x < xEnd {
-                sums[destination + x] += UInt32(source[x + shift.dx])
-                if counts[destination + x] < 255 {
-                    counts[destination + x] += 1
+        let rowBytes = frame.bytesPerRow
+        guard rowBytes >= width * 2 else { return }
+        frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.baseAddress else { return }
+            let yStart = max(0, -shift.dy)
+            let yEnd = min(height, height - shift.dy)
+            let xStart = max(0, -shift.dx)
+            let xEnd = min(width, width - shift.dx)
+            guard xStart < xEnd, yStart < yEnd else { return }
+            for y in yStart..<yEnd {
+                let source = base.advanced(by: (y + shift.dy) * rowBytes).assumingMemoryBound(to: UInt16.self)
+                let destination = y * width
+                var x = xStart
+                while x < xEnd {
+                    sums[destination + x] += UInt32(source[x + shift.dx])
+                    if counts[destination + x] < 255 {
+                        counts[destination + x] += 1
+                    }
+                    x += 1
                 }
-                x += 1
             }
         }
     }

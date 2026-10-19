@@ -1,6 +1,7 @@
 import AVFoundation
 import Photos
 import UIKit
+import os
 
 struct CaptureCapabilities: Equatable {
     var machine: String
@@ -46,6 +47,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private let photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "dev.lucas.burstlab.session")
     private let processingQueue = DispatchQueue(label: "dev.lucas.burstlab.processing", qos: .userInitiated)
+    private let burstLog = Logger(subsystem: "dev.lucas.burstlab", category: "burst")
     private var photoDevice: AVCaptureDevice?
     private var configured = false
     private var probeActive = false
@@ -55,12 +57,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var probeIntervalStart: CFTimeInterval?
     private var calibrationBuffer: CVPixelBuffer?
     private var burstActive = false
-    private var burstFrames: [CVPixelBuffer] = []
+    private var burstFrames: [BurstFrame] = []
     private var burstRemaining = 0
     private var burstFormat: OSType = 0
     private var burstStart: CFTimeInterval = 0
     private var burstConfig = BurstConfig.defaults(for: .photo)
     private var burstRetries = 0
+    private var burstReadinessPolls = 0
 
     func start() {
         #if targetEnvironment(simulator)
@@ -76,7 +79,12 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 if self.configured, !self.session.isRunning {
                     self.session.startRunning()
                 }
-                DispatchQueue.main.async { self.isConfigured = self.configured }
+                DispatchQueue.main.async {
+                    self.isConfigured = self.configured
+                    if self.configured {
+                        UIApplication.shared.isIdleTimerDisabled = true
+                    }
+                }
                 self.publishCapabilities()
             }
         }
@@ -89,6 +97,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 self.session.stopRunning()
             }
         }
+        DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false }
     }
 
     func capturePhoto() {
@@ -349,6 +358,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func captureBurst() {
         sessionQueue.async {
+            self.burstLog.notice("captureBurst configured=\(self.configured, privacy: .public) running=\(self.session.isRunning, privacy: .public) probe=\(self.probeActive, privacy: .public) burst=\(self.burstActive, privacy: .public)")
             guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else { return }
             guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
                 DispatchQueue.main.async { self.lastCaptureNote = "RAW indisponivel para o burst." }
@@ -361,6 +371,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstFrames.removeAll()
             self.burstRemaining = self.burstConfig.frameCount
             self.burstRetries = 0
+            self.burstReadinessPolls = 0
             self.burstStart = CFAbsoluteTimeGetCurrent()
             DispatchQueue.main.async {
                 self.isCapturingBurst = true
@@ -373,16 +384,15 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 let scaled = CMTimeMultiplyByFloat64(device.exposureDuration, multiplier: factor)
                 let duration = CMTimeMaximum(CMTimeMinimum(scaled, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
                 let iso = min(max(device.iso, device.activeFormat.minISO), device.activeFormat.maxISO)
-                NSLog("BurstLab: burst start frames=%d iso=%.0f duration=%.4f ev=%.1f",
-                      self.burstConfig.frameCount, iso, CMTimeGetSeconds(duration), self.burstConfig.underExposureEV)
+                self.burstLog.notice("burst start frames=\(self.burstConfig.frameCount, privacy: .public) iso=\(iso, privacy: .public) duration=\(CMTimeGetSeconds(duration), privacy: .public) ev=\(self.burstConfig.underExposureEV, privacy: .public)")
                 if device.isFocusModeSupported(.locked) {
                     device.focusMode = .locked
                 }
                 let canCustom = device.isExposureModeSupported(.custom)
                 if canCustom {
                     device.setExposureModeCustom(duration: duration, iso: iso) { actual in
-                        NSLog("BurstLab: exposure settled duration=%.4f", CMTimeGetSeconds(actual))
-                        self.sessionQueue.asyncAfter(deadline: .now() + 0.2) {
+                        self.burstLog.notice("exposure settled duration=\(CMTimeGetSeconds(actual), privacy: .public)")
+                        self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
                             self.captureBurstFrame()
                         }
                     }
@@ -391,7 +401,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 }
                 device.unlockForConfiguration()
                 if !canCustom {
-                    self.sessionQueue.asyncAfter(deadline: .now() + 0.2) {
+                    self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
                         self.captureBurstFrame()
                     }
                 }
@@ -407,7 +417,22 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             abortBurst("Burst interrompido: sessao de camera parou.")
             return
         }
-        NSLog("BurstLab: request frame %d/%d", burstConfig.frameCount - burstRemaining + 1, burstConfig.frameCount)
+        if #available(iOS 17.0, *) {
+            let readiness = photoOutput.captureReadiness
+            if readiness != .ready {
+                if burstReadinessPolls < 20 {
+                    burstReadinessPolls += 1
+                    burstLog.notice("output not ready readiness=\(String(describing: readiness), privacy: .public) poll=\(self.burstReadinessPolls, privacy: .public)")
+                    sessionQueue.asyncAfter(deadline: .now() + 0.1) { self.captureBurstFrame() }
+                    return
+                }
+                abortBurst("Burst: camera nao ficou pronta (\(String(describing: readiness))).")
+                return
+            }
+        }
+        burstReadinessPolls = 0
+        let frameNumber = burstConfig.frameCount - burstRemaining + 1
+        burstLog.notice("request frame \(frameNumber, privacy: .public)/\(self.burstConfig.frameCount, privacy: .public)")
         let settings = AVCapturePhotoSettings(rawPixelFormatType: burstFormat)
         settings.photoQualityPrioritization = .speed
         settings.flashMode = .off
@@ -422,14 +447,14 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             if let underlying = nsError.userInfo[NSUnderlyingErrorKey] as? NSError {
                 detail += " | causa \(underlying.domain) \(underlying.code): \(underlying.localizedDescription)"
             }
-            NSLog("BurstLab: frame error %@", detail)
+            burstLog.notice("frame error \(detail, privacy: .public)")
             if burstRetries < 2 {
                 burstRetries += 1
                 let frame = burstConfig.frameCount - burstRemaining + 1
                 DispatchQueue.main.async {
                     self.lastCaptureNote = "Burst: repetindo frame \(frame)/\(self.burstConfig.frameCount) (\(detail))"
                 }
-                sessionQueue.asyncAfter(deadline: .now() + 0.3) { self.captureBurstFrame() }
+                sessionQueue.asyncAfter(deadline: .now() + 0.6) { self.captureBurstFrame() }
                 return
             }
             abortBurst("Burst interrompido (frame \(burstConfig.frameCount - burstRemaining + 1)): \(detail)")
@@ -440,10 +465,14 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             abortBurst("Burst sem pixel buffer RAW.")
             return
         }
-        burstFrames.append(pixelBuffer)
+        guard let frame = makeBurstFrame(from: pixelBuffer) else {
+            abortBurst("Burst: falha ao copiar frame RAW.")
+            return
+        }
+        burstFrames.append(frame)
         burstRemaining -= 1
         let captured = burstConfig.frameCount - burstRemaining
-        NSLog("BurstLab: frame %d/%d received", captured, burstConfig.frameCount)
+        burstLog.notice("frame \(captured, privacy: .public)/\(self.burstConfig.frameCount, privacy: .public) received \(frame.data.count, privacy: .public) bytes")
         DispatchQueue.main.async { self.lastCaptureNote = "Burst: \(captured)/\(self.burstConfig.frameCount)" }
         if burstRemaining > 0 {
             captureBurstFrame()
@@ -452,13 +481,25 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    private func makeBurstFrame(from buffer: CVPixelBuffer) -> BurstFrame? {
+        guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == 0 else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(buffer)
+        let height = CVPixelBufferGetHeight(buffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+        guard width > 0, height > 0, bytesPerRow >= width * 2,
+              let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
+        let data = Data(bytes: UnsafeRawPointer(base), count: bytesPerRow * height)
+        return BurstFrame(width: width, height: height, bytesPerRow: bytesPerRow, data: data)
+    }
+
     private func finishBurst() {
         let frames = burstFrames
         let config = burstConfig
         burstFrames.removeAll()
         burstActive = false
         restoreCameraModes()
-        NSLog("BurstLab: capture done frames=%d elapsed=%.2fs", frames.count, CFAbsoluteTimeGetCurrent() - burstStart)
+        burstLog.notice("capture done frames=\(frames.count, privacy: .public) elapsed=\(CFAbsoluteTimeGetCurrent() - self.burstStart, privacy: .public)")
         DispatchQueue.main.async {
             self.isCapturingBurst = false
             self.status = "Processando burst..."
@@ -469,7 +510,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 let result = try BurstProcessor.process(frames: frames, underExposureEV: config.underExposureEV)
                 self.saveBurst(result)
             } catch {
-                NSLog("BurstLab: process error %@", error.localizedDescription)
+                self.burstLog.notice("process error \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     self.status = "Falha no burst"
                     self.lastCaptureNote = "Erro: \(error.localizedDescription)"
@@ -494,7 +535,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     }
 
     private func abortBurst(_ message: String) {
-        NSLog("BurstLab: abort %@", message)
+        burstLog.notice("abort \(message, privacy: .public)")
         burstActive = false
         burstFrames.removeAll()
         restoreCameraModes()
@@ -508,6 +549,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private func saveBurst(_ result: BurstProcessResult) {
         let megabytes = Double(result.jpegData.count) / 1_048_576
         let shifts = result.shifts.dropFirst().map { "(\($0.dx),\($0.dy))" }.joined(separator: " ")
+        let shiftText = shifts.isEmpty ? "0" : shifts
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
                 DispatchQueue.main.async {
@@ -526,11 +568,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                         format: "Burst %d frames %dx%d: %.1f MB | proc %.1fs | WB R %.2f | exp %.2f | desloc %@",
                         result.frameCount, result.width, result.height, megabytes,
                         result.elapsedSeconds, result.whiteGain, result.exposureScale,
-                        shifts.isEmpty ? "0" : shifts
+                        shiftText
                     )
-                    NSLog("BurstLab: saved %d bytes proc=%.2fs scale=%.2f wbR=%.2f shifts=%@",
-                          result.jpegData.count, result.elapsedSeconds, result.exposureScale,
-                          result.whiteGain, shifts.isEmpty ? "0" : shifts)
+                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) shifts=\(shiftText, privacy: .public)")
                 } else {
                         self.status = "Falha ao salvar"
                         self.lastCaptureNote = "Burst: \(error?.localizedDescription ?? "erro desconhecido")"
