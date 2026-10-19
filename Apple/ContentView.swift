@@ -40,6 +40,17 @@ struct ContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
                 Button {
+                    camera.probeRawBurst()
+                } label: {
+                    Text(camera.isProbingRaw ? "Sondando RAW..." : "Sonda burst RAW (8 frames)")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(.black.opacity(0.55), in: Capsule())
+                }
+                .disabled(!camera.isConfigured || camera.isProbingRaw)
+                Button {
                     camera.capturePhoto()
                 } label: {
                     ZStack {
@@ -56,7 +67,7 @@ struct ContentView: View {
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
         .sheet(isPresented: $showReport) {
-            CapabilityReportView(capabilities: camera.capabilities, fallback: camera.status)
+            CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport, fallback: camera.status)
         }
     }
 }
@@ -64,12 +75,26 @@ struct ContentView: View {
 struct CapabilityReportView: View {
     @Environment(\.dismiss) private var dismiss
     let capabilities: CaptureCapabilities?
+    let rawProbe: String?
     let fallback: String
+
+    private var reportText: String {
+        var parts: [String] = []
+        if let capabilities {
+            parts.append(capabilities.report)
+        } else {
+            parts.append(fallback)
+        }
+        if let rawProbe {
+            parts.append("=== Burst RAW ===\n" + rawProbe)
+        }
+        return parts.joined(separator: "\n\n")
+    }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(capabilities?.report ?? fallback)
+                Text(reportText)
                     .font(.caption.monospaced())
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding()
@@ -82,13 +107,11 @@ struct CapabilityReportView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button {
-                        if let report = capabilities?.report {
-                            UIPasteboard.general.string = report
-                        }
+                        UIPasteboard.general.string = reportText
                     } label: {
                         Image(systemName: "doc.on.doc")
                     }
-                    .disabled(capabilities == nil)
+                    .disabled(capabilities == nil && rawProbe == nil)
                     .accessibilityLabel("Copiar relatorio")
                 }
             }

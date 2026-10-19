@@ -23,7 +23,7 @@ struct CaptureCapabilities: Equatable {
         lines.append("iOS: \(systemVersion)")
         lines.append(String(format: "Memoria fisica: %.2f GB", physicalMemoryGB))
         lines.append("Formato ativo: \(activeWidth)x\(activeHeight)")
-        lines.append(String(format: "Exposicao: %.4fs a %.4fs", minExposureSeconds, maxExposureSeconds))
+        lines.append(String(format: "Exposicao: %.6fs a %.6fs", minExposureSeconds, maxExposureSeconds))
         lines.append(String(format: "ISO: %.0f a %.0f", minISO, maxISO))
         lines.append("Flash: \(hasFlash ? "sim" : "nao") / Tocha: \(hasTorch ? "sim" : "nao")")
         lines.append("Formatos RAW disponiveis: \(rawFormats.isEmpty ? "nenhum" : rawFormats.joined(separator: ", "))")
@@ -37,6 +37,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var capabilities: CaptureCapabilities?
     @Published var lastCaptureNote = ""
     @Published var isConfigured = false
+    @Published var isProbingRaw = false
+    @Published var rawProbeReport: String?
 
     let session = AVCaptureSession()
 
@@ -44,6 +46,11 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private let sessionQueue = DispatchQueue(label: "dev.lucas.burstlab.session")
     private var photoDevice: AVCaptureDevice?
     private var configured = false
+    private var probeActive = false
+    private var probeRemaining = 0
+    private var probeLines: [String] = []
+    private var probeStart: CFTimeInterval = 0
+    private var probeIntervalStart: CFTimeInterval?
 
     func start() {
         #if targetEnvironment(simulator)
@@ -76,7 +83,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func capturePhoto() {
         sessionQueue.async {
-            guard self.configured else {
+            guard self.configured, !self.probeActive else {
                 DispatchQueue.main.async { self.status = "Sessao de camera indisponivel." }
                 return
             }
@@ -156,7 +163,123 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         return String(bytes: bytes, encoding: .ascii) ?? "0x" + String(value, radix: 16)
     }
 
+    func probeRawBurst() {
+        sessionQueue.async {
+            guard self.configured, !self.probeActive else { return }
+            guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
+                DispatchQueue.main.async { self.rawProbeReport = "Nenhum formato RAW disponivel neste aparelho." }
+                return
+            }
+            self.probeActive = true
+            self.probeRemaining = 8
+            self.probeLines.removeAll()
+            self.probeStart = CFAbsoluteTimeGetCurrent()
+            self.probeIntervalStart = nil
+            DispatchQueue.main.async {
+                self.isProbingRaw = true
+                self.rawProbeReport = nil
+                self.status = "Sondando burst RAW..."
+            }
+            self.captureRawProbeFrame(format: rawFormat)
+        }
+    }
+
+    private func captureRawProbeFrame(format: OSType) {
+        let settings = AVCapturePhotoSettings(rawPixelFormatType: format)
+        settings.photoQualityPrioritization = .speed
+        settings.flashMode = .off
+        photoOutput.capturePhoto(with: settings, delegate: self)
+    }
+
+    private func handleRawProbeFrame(_ photo: AVCapturePhoto, error: Error?) {
+        let frameNumber = 9 - probeRemaining
+        if let error {
+            probeLines.append("Frame \(frameNumber): erro \(error.localizedDescription)")
+            finishRawProbe(status: "Sonda RAW interrompida")
+            return
+        }
+        guard let pixelBuffer = photo.pixelBuffer else {
+            probeLines.append("Frame \(frameNumber): sem pixel buffer RAW")
+            finishRawProbe(status: "Sonda RAW interrompida")
+            return
+        }
+        let now = CFAbsoluteTimeGetCurrent()
+        let interval = now - (probeIntervalStart ?? probeStart)
+        probeIntervalStart = now
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        var range = "sem amostras"
+        if let base = CVPixelBufferGetBaseAddress(pixelBuffer), rowBytes >= width * 2 {
+            var minimum = UInt32.max
+            var maximum: UInt32 = 0
+            var total: UInt64 = 0
+            var count: UInt64 = 0
+            for y in stride(from: 0, to: height, by: 8) {
+                let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
+                for x in stride(from: 0, to: width, by: 8) {
+                    let value = UInt32(row[x])
+                    minimum = min(minimum, value)
+                    maximum = max(maximum, value)
+                    total += UInt64(value)
+                    count += 1
+                }
+            }
+            let mean = count > 0 ? Double(total) / Double(count) : 0
+            range = String(format: "min %u media %.0f max %u", minimum, mean, maximum)
+        }
+        let exposure = CMTimeGetSeconds(photo.resolvedSettings.exposureDuration)
+        probeLines.append(String(
+            format: "Frame %d: %.1f ms, exp %.6fs, %dx%d, %d B/linha, FourCC %@, %@",
+            frameNumber, interval * 1000, exposure, width, height, rowBytes,
+            CameraController.fourCC(format), range
+        ))
+
+        probeRemaining -= 1
+        if probeRemaining > 0, let nextFormat = photoOutput.availableRawPhotoPixelFormatTypes.first {
+            captureRawProbeFrame(format: nextFormat)
+        } else {
+            finishRawProbe(status: "Sonda RAW concluida. Abra o relatorio (i).")
+        }
+    }
+
+    private func finishRawProbe(status: String) {
+        let elapsed = CFAbsoluteTimeGetCurrent() - probeStart
+        let validFrames = probeLines.filter { $0.hasPrefix("Frame ") && !$0.contains("erro") }.count
+        let rate = elapsed > 0 ? Double(validFrames) / elapsed : 0
+        var lines = [
+            String(format: "BURST RAW: %d frames em %.2fs (%.1f fps)", validFrames, elapsed, rate),
+            "Termica ao final: \(CameraController.thermalStateName(ProcessInfo.processInfo.thermalState))"
+        ]
+        lines.append(contentsOf: probeLines)
+        let report = lines.joined(separator: "\n")
+        probeActive = false
+        DispatchQueue.main.async {
+            self.isProbingRaw = false
+            self.rawProbeReport = report
+            self.status = status
+        }
+    }
+
+    private static func thermalStateName(_ state: ProcessInfo.ThermalState) -> String {
+        switch state {
+        case .nominal: return "nominal"
+        case .fair: return "fair"
+        case .serious: return "serious"
+        case .critical: return "critical"
+        @unknown default: return "desconhecida"
+        }
+    }
+
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if probeActive {
+            sessionQueue.async { self.handleRawProbeFrame(photo, error: error) }
+            return
+        }
         if let error {
             DispatchQueue.main.async { self.lastCaptureNote = "Falha: \(error.localizedDescription)" }
             return

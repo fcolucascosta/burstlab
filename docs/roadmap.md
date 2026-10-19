@@ -8,14 +8,19 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 - [x] Referencias abertas mapeadas (HDR+, IPOL, low-light, SR).
 - [ ] Amostras de referencia do Indigo (DNG/JPEG) para analise de look.
 
-## F1 - Esqueleto de captura (este repositorio)
+## F1 - Esqueleto de captura (concluida)
 
 - [x] Projeto Xcode gerado por script, workflow de CI e empacotador de IPA.
 - [x] App SwiftUI com preview, sonda de capacidades e captura unica para a fototeca.
-- [ ] Primeiro build no GitHub Actions e instalacao pelo iLoader.
-- [ ] Relatorio da sonda no aparelho: RAW disponivel? ISO/exposicao? taxa de burst?
+- [x] Primeiro build no GitHub Actions e instalacao pelo iLoader (0.1.0, run 39324304300).
+- [x] Relatorio da sonda no aparelho: RAW `rgg4` (14-bit RGGB) confirmado; exposicao ate 0,5 s; ISO 22-2112; 3,79 GB.
 
-**Criterio de aceite**: app abre no SE, captura uma foto que aparece na fototeca, e o relatorio de capacidades responde as questoes abertas de `docs/pipeline.md`.
+## F1.5 - Sonda de burst RAW
+
+- [x] Implementada no app: captura sequencial de 8 frames RAW com tempo por frame, estatisticas de nivel (min/media/max), FourCC, bytes/linha e estado termico.
+- [ ] Relatorio no aparelho: taxa de burst, nivel de preto/saturacao, efeito termico.
+
+**Criterio de aceite**: relatorio de 8 frames com fps medio e valores de preto/saturacao coerentes com 14 bits; decide-se o numero de frames e o budget final do F2.
 
 ## F2 - Nucleo de burst
 

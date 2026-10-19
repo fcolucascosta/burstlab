@@ -25,6 +25,7 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 - 4 GB de RAM: o pico de memoria deve ficar bem abaixo do limite de Jetsam. Contas: RAW 12 MP 16 bpp = 4032 x 3024 x 2 = ~23,3 MB/frame; 8 frames ~186 MB; orcamento alvo de trabalho ~256-512 MB.
 - Processar por tiles no Metal, alinhar em resolucao reduzida (ex. 1/4) e aplicar warp em tiles full-res.
 - Termica num corpo pequeno: bursts curtos e limites de frames por modo.
+- Exposicao maxima de 0,5 s por frame (medida): Night soma mais frames, nao frames de 1 s.
 
 ## Algoritmos planejados (com referencias abertas)
 
@@ -42,11 +43,18 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 - SNR em sombras (cartao cinza), MTF (estrela de Siemens), ghosting (cena com movimento), latencia por captura e comportamento termico.
 - Nenhuma afirmacao de qualidade sem medicao no aparelho. Cada fase termina com um IPA instalado e um relatorio em `reports/`.
 
-## Questoes abertas (respondidas pela sonda F1)
+## Respostas da sonda no SE 2022 (2026-10-19)
 
-- O SE 2022 oferece Bayer RAW pela AVFoundation? Em qual formato?
-- `maxExposureDuration` do formato de foto (Night precisa de ~1 s).
-- Taxa real de burst RAW em 12 MP no A15.
+- **RAW Bayer: sim.** Formato `rgg4` (14-bit Bayer RGGB), buffer unico de 4032 x 3024. O risco principal da F1 esta eliminado.
+- **Exposicao maxima: 0,5 s** por frame no formato ativo (a minima aparece como 0.0000s com 4 casas; corrigido para 6 casas na proxima build). O Night do Indigo usa ate 1 s por frame; no SE vamos somar mais frames (32 x 0,5 s = 16 s de integracao maxima).
+- **ISO: 22-2112** no formato processado ativo; o formato RAW pode ter faixa diferente (medir na sonda de burst).
+- **Memoria fisica: 3,79 GB**, confirmando o orcamento conservador de frames.
+- **Formatos processados**: 420f, 420v, BGRA.
+
+### Ainda em aberto
+
+- Taxa real de burst RAW em 12 MP no A15 (medida pela sonda de burst, F1.5).
+- Faixa de ISO/exposicao do formato RAW e nivel de preto/saturacao (estatisticas da sonda de burst).
 - Custo termico de bursts de 8-16 frames.
 
 ## Referencias
