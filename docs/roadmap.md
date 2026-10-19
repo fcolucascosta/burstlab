@@ -23,15 +23,14 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 
 **Criterio de aceite**: taxa de burst e comportamento termico atendidos (17 fps; nominal). O numero de frames do F2 parte de 8-12 e testa 16.
 
-## F2 - Nucleo de burst
+## F2 - Nucleo de burst (v1 implementada; validacao no aparelho pendente)
 
-- Captura de N frames RAW (ring buffer) com exposicao constante subexposta.
+- [x] Captura de 8 frames RAW com exposicao constante (AE travado, -1,5 EV) e foco travado.
+- [x] Alinhamento por projecoes (transacao inteira, arredondada para par) e merge por media.
+- [x] Demosaic Malvar-He-Cutler, WB gray-world, tone mapping global e JPEG na fototeca.
 - Budget medido: 24,4 MB/frame; 8 frames = 195 MB; acumulador UInt32 = 48,8 MB; pico alvo < 150 MB.
-- Alinhamento (FFT/piramide) e merge robusto.
-- Demosaic + WB + saida JPEG.
-- Metricas: SNR em sombras vs frame unico; detalhe (MTF); ghosting.
-
-**Criterio de aceite (hipotese a testar)**: foto de 8 frames com SNR em sombras visivelmente melhor que o frame unico, sem artefatos de ghost em cena estatica, dentro do orcamento de memoria.
+- [ ] Validacao no aparelho: SNR em sombras vs frame unico, ghosting, cores, latencia e pico de memoria.
+- [ ] Merge robusto (rejeicao de outliers/ghosting) e alinhamento subpixel/piramide.
 
 ## F3 - Look natural
 
