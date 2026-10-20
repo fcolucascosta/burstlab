@@ -18,6 +18,7 @@ struct BurstProcessResult {
     let whiteGain: Float
     let blueGain: Float
     let exposureScale: Float
+    let usedCCM: Bool
     let elapsedSeconds: Double
 }
 
@@ -51,7 +52,8 @@ enum BurstProcessor {
         frames: [BurstFrame],
         underExposureEV: Double,
         rotationAngle: Int = 0,
-        asShotNeutral: [Double]? = nil
+        asShotNeutral: [Double]? = nil,
+        colorMatrix: [Double]? = nil
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -124,17 +126,8 @@ enum BurstProcessor {
         let meanGreenB = phaseCount[2] > 0 ? phaseSum[2] / Double(phaseCount[2]) : Double(blackLevel)
         let meanBlue = phaseCount[3] > 0 ? phaseSum[3] / Double(phaseCount[3]) : Double(blackLevel)
         let meanGreen = max((meanGreenA + meanGreenB) / 2, Double(blackLevel) + 1)
-        var redGain: Float
-        var blueGain: Float
-        if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
-            redGain = min(max(Float(neutral[1] / neutral[0]), 0.25), 4.0)
-            blueGain = min(max(Float(neutral[1] / neutral[2]), 0.25), 4.0)
-        } else {
-            redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
-            blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
-            redGain = min(max(redGain, 0.5), 2.5)
-            blueGain = min(max(blueGain, 0.5), 2.5)
-        }
+        var redGain: Float = 1
+        var blueGain: Float = 1
 
         let greenSamples = histogram.reduce(0, +)
         var medianGreen = Double(blackLevel)
@@ -152,9 +145,43 @@ enum BurstProcessor {
         let medianNorm = max((medianGreen - Double(blackLevel)) / Double(usefullRange), 0.002)
         let exposureScale = Float(min(max(0.18 / medianNorm, 0.5), 24.0))
 
+        var ccm: [Double]? = nil
+        if let neutral = asShotNeutral, let matrix = colorMatrix {
+            ccm = BurstColorMatrix.calibratedForNeutral(matrix: matrix, neutral: neutral)
+        }
+        if ccm == nil {
+            if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
+                redGain = min(max(Float(neutral[1] / neutral[0]), 0.25), 4.0)
+                blueGain = min(max(Float(neutral[1] / neutral[2]), 0.25), 4.0)
+            } else {
+                redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
+                blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
+                redGain = min(max(redGain, 0.5), 2.5)
+                blueGain = min(max(blueGain, 0.5), 2.5)
+            }
+        }
+
         let redLUT = makeLUT(gain: redGain, scale: exposureScale)
         let greenLUT = makeLUT(gain: 1, scale: exposureScale)
         let blueLUT = makeLUT(gain: blueGain, scale: exposureScale)
+
+        let rangeD = Double(usefullRange)
+        let scaleD = Double(exposureScale)
+        let blackInt = Int(blackLevel)
+        func gammaIndex(_ value: Double) -> Int {
+            let clamped = min(max(value, 0), 1)
+            return min(Int(clamped * 4096.0), 4096)
+        }
+        let gammaTable: [UInt8]
+        if ccm != nil {
+            var table = [UInt8](repeating: 0, count: 4097)
+            for index in 0...4096 {
+                table[index] = UInt8((pow(Double(index) / 4096.0, 1.0 / 2.2) * 255.0).rounded())
+            }
+            gammaTable = table
+        } else {
+            gammaTable = []
+        }
 
         let rgbBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * 3)
         rgbBytes.initialize(repeating: 0, count: pixelCount * 3)
@@ -221,9 +248,21 @@ enum BurstProcessor {
                 }
 
                 let offset = (y0 + x) * 3
-                rgbBytes[offset] = redLUT[min(max(red, 0), 65535)]
-                rgbBytes[offset + 1] = greenLUT[min(max(green, 0), 65535)]
-                rgbBytes[offset + 2] = blueLUT[min(max(blue, 0), 65535)]
+                if let cc = ccm {
+                    let lr = Double(max(red, 0) - blackInt) / rangeD
+                    let lg = Double(max(green, 0) - blackInt) / rangeD
+                    let lb = Double(max(blue, 0) - blackInt) / rangeD
+                    let sr = (cc[0] * lr + cc[1] * lg + cc[2] * lb) * scaleD
+                    let sg = (cc[3] * lr + cc[4] * lg + cc[5] * lb) * scaleD
+                    let sb = (cc[6] * lr + cc[7] * lg + cc[8] * lb) * scaleD
+                    rgbBytes[offset] = gammaTable[gammaIndex(sr)]
+                    rgbBytes[offset + 1] = gammaTable[gammaIndex(sg)]
+                    rgbBytes[offset + 2] = gammaTable[gammaIndex(sb)]
+                } else {
+                    rgbBytes[offset] = redLUT[min(max(red, 0), 65535)]
+                    rgbBytes[offset + 1] = greenLUT[min(max(green, 0), 65535)]
+                    rgbBytes[offset + 2] = blueLUT[min(max(blue, 0), 65535)]
+                }
             }
         }
 
@@ -269,9 +308,10 @@ enum BurstProcessor {
             height: outputHeight,
             frameCount: frames.count,
             shifts: shifts.map { ($0.dx, $0.dy) },
-            whiteGain: redGain,
-            blueGain: blueGain,
+            whiteGain: ccm != nil ? 1.0 : redGain,
+            blueGain: ccm != nil ? 1.0 : blueGain,
             exposureScale: exposureScale,
+            usedCCM: ccm != nil,
             elapsedSeconds: CFAbsoluteTimeGetCurrent() - started
         )
     }

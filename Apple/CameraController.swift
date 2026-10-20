@@ -66,6 +66,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
     private var burstAsShotNeutral: [Double]?
+    private var burstColorMatrix: [Double]?
     private var rotationCoordinatorStorage: Any?
 
     func start() {
@@ -379,6 +380,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstRetries = 0
             self.burstReadinessPolls = 0
             self.burstAsShotNeutral = nil
+            self.burstColorMatrix = nil
             self.burstRotationAngle = 90
             if #available(iOS 17.0, *) {
                 if let coordinator = self.rotationCoordinatorStorage as? AVCaptureDevice.RotationCoordinator {
@@ -516,17 +518,33 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 burstLog.notice("as shot neutral \(text, privacy: .public)")
             }
         }
-        for key in [kCGImagePropertyDNGColorMatrix1 as String, kCGImagePropertyDNGColorMatrix2 as String] {
-            guard let matrix = dng[key] as? [Any] else { continue }
+        func readMatrix(_ key: String) -> [Double]? {
+            guard let matrix = dng[key] as? [Any] else { return nil }
             let values = matrix.compactMap { ($0 as? NSNumber)?.doubleValue }
-            guard values.count == 9 else { continue }
-            let text = values.map { String(format: "%.4f", $0) }.joined(separator: ",")
-            burstLog.notice("color matrix \(text, privacy: .public)")
+            return values.count == 9 ? values : nil
         }
-        let illuminant1 = dng[kCGImagePropertyDNGCalibrationIlluminant1 as String] as? NSNumber
-        let illuminant2 = dng[kCGImagePropertyDNGCalibrationIlluminant2 as String] as? NSNumber
-        if illuminant1 != nil || illuminant2 != nil {
-            burstLog.notice("ill1=\(illuminant1?.intValue ?? -1, privacy: .public) ill2=\(illuminant2?.intValue ?? -1, privacy: .public)")
+        let cm1 = readMatrix(kCGImagePropertyDNGColorMatrix1 as String)
+        let cm2 = readMatrix(kCGImagePropertyDNGColorMatrix2 as String)
+        if let cm1 {
+            burstLog.notice("color matrix1 \(cm1.map { String(format: "%.4f", $0) }.joined(separator: ","), privacy: .public)")
+        }
+        if let cm2 {
+            burstLog.notice("color matrix2 \(cm2.map { String(format: "%.4f", $0) }.joined(separator: ","), privacy: .public)")
+        }
+        let illuminant1 = (dng[kCGImagePropertyDNGCalibrationIlluminant1 as String] as? NSNumber)?.intValue ?? 0
+        let illuminant2 = (dng[kCGImagePropertyDNGCalibrationIlluminant2 as String] as? NSNumber)?.intValue ?? 0
+        if illuminant1 > 0 || illuminant2 > 0 {
+            burstLog.notice("ill1=\(illuminant1, privacy: .public) ill2=\(illuminant2, privacy: .public)")
+        }
+        if illuminant2 == 21 {
+            burstColorMatrix = cm2 ?? cm1
+        } else if illuminant1 == 21 {
+            burstColorMatrix = cm1 ?? cm2
+        } else {
+            burstColorMatrix = cm2 ?? cm1
+        }
+        if burstColorMatrix == nil {
+            burstLog.notice("matriz de cor ausente no dng")
         }
     }
 
@@ -547,6 +565,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
+        let colorMatrix = burstColorMatrix
         burstFrames.removeAll()
         burstActive = false
         restoreCameraModes()
@@ -562,7 +581,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     frames: frames,
                     underExposureEV: config.underExposureEV,
                     rotationAngle: rotationAngle,
-                    asShotNeutral: asShotNeutral
+                    asShotNeutral: asShotNeutral,
+                    colorMatrix: colorMatrix
                 )
                 self.saveBurst(result)
             } catch {
@@ -626,7 +646,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                         result.elapsedSeconds, result.whiteGain, result.exposureScale,
                         shiftText
                     )
-                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) wbB=\(result.blueGain, privacy: .public) shifts=\(shiftText, privacy: .public)")
+                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) wbB=\(result.blueGain, privacy: .public) ccm=\(result.usedCCM ? 1 : 0, privacy: .public) shifts=\(shiftText, privacy: .public)")
                 } else {
                         self.status = "Falha ao salvar"
                         self.lastCaptureNote = "Burst: \(error?.localizedDescription ?? "erro desconhecido")"

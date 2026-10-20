@@ -22,7 +22,7 @@ public struct BurstConfig: Equatable, Sendable {
     public static func defaults(for mode: CaptureMode) -> BurstConfig {
         switch mode {
         case .photo:
-            return BurstConfig(mode: .photo, frameCount: 8, underExposureEV: -1.5)
+            return BurstConfig(mode: .photo, frameCount: 8, underExposureEV: -0.5)
         case .night:
             return BurstConfig(mode: .night, frameCount: 16, underExposureEV: -1.0)
         case .longExposure:
@@ -58,7 +58,6 @@ public struct FrameMemoryBudget: Equatable, Sendable {
 }
 
 public enum BurstGeometry {
-    /// Rotates an RGB888 buffer (3 bytes per pixel, row-major) clockwise by a multiple of 90 degrees.
     public static func rotateRGB(
         pixels: [UInt8],
         width: Int,
@@ -108,5 +107,25 @@ public enum BurstGeometry {
             }
         }
         return (out, newWidth, newHeight)
+    }
+}
+
+public enum BurstColorMatrix {
+    /// Normalizes a DNG color matrix so that the given camera neutral maps to pure white.
+    public static func calibratedForNeutral(matrix: [Double], neutral: [Double]) -> [Double]? {
+        guard matrix.count == 9, neutral.count == 3, neutral.allSatisfy({ $0 > 0 }) else {
+            return nil
+        }
+        var result = matrix
+        for row in 0..<3 {
+            let dot = result[row * 3] * neutral[0]
+                + result[row * 3 + 1] * neutral[1]
+                + result[row * 3 + 2] * neutral[2]
+            guard abs(dot) > 1e-6 else { return nil }
+            result[row * 3] /= dot
+            result[row * 3 + 1] /= dot
+            result[row * 3 + 2] /= dot
+        }
+        return result
     }
 }
