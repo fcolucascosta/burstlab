@@ -502,15 +502,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     }
 
     private func captureBurstCalibration(from photo: AVCapturePhoto) {
-        var dng = photo.metadata[kCGImagePropertyDNGDictionary] as? [String: Any] ?? [:]
-        if dng.isEmpty, let metadata = photo.fileDataRepresentation()?.metadata {
-            dng = metadata[kCGImagePropertyDNGDictionary] as? [String: Any] ?? [:]
-        }
+        let dngKey = kCGImagePropertyDNGDictionary as String
+        let dng = photo.metadata[dngKey] as? [String: Any] ?? [:]
         if dng.isEmpty {
             burstLog.notice("dng metadata ausente no primeiro frame")
             return
         }
-        if let neutral = dng[kCGImagePropertyDNGAsShotNeutral] as? [Any] {
+        if let neutral = dng[kCGImagePropertyDNGAsShotNeutral as String] as? [Any] {
             let values = neutral.compactMap { ($0 as? NSNumber)?.doubleValue }
             if values.count == 3, values.allSatisfy({ $0 > 0 }) {
                 burstAsShotNeutral = values
@@ -518,15 +516,15 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 burstLog.notice("as shot neutral \(text, privacy: .public)")
             }
         }
-        for key in [kCGImagePropertyDNGColorMatrix1, kCGImagePropertyDNGColorMatrix2] {
+        for key in [kCGImagePropertyDNGColorMatrix1 as String, kCGImagePropertyDNGColorMatrix2 as String] {
             guard let matrix = dng[key] as? [Any] else { continue }
             let values = matrix.compactMap { ($0 as? NSNumber)?.doubleValue }
             guard values.count == 9 else { continue }
             let text = values.map { String(format: "%.4f", $0) }.joined(separator: ",")
             burstLog.notice("color matrix \(text, privacy: .public)")
         }
-        let illuminant1 = dng[kCGImagePropertyDNGCalibrationIlluminant1] as? NSNumber
-        let illuminant2 = dng[kCGImagePropertyDNGCalibrationIlluminant2] as? NSNumber
+        let illuminant1 = dng[kCGImagePropertyDNGCalibrationIlluminant1 as String] as? NSNumber
+        let illuminant2 = dng[kCGImagePropertyDNGCalibrationIlluminant2 as String] as? NSNumber
         if illuminant1 != nil || illuminant2 != nil {
             burstLog.notice("ill1=\(illuminant1?.intValue ?? -1, privacy: .public) ill2=\(illuminant2?.intValue ?? -1, privacy: .public)")
         }
