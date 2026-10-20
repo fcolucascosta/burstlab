@@ -19,6 +19,7 @@ struct BurstProcessResult {
     let blueGain: Float
     let exposureScale: Float
     let usedCCM: Bool
+    let denoised: Bool
     let elapsedSeconds: Double
 }
 
@@ -266,6 +267,8 @@ enum BurstProcessor {
             }
         }
 
+        denoiseInPlace(pixels: rgbBytes, width: width, height: height)
+
         let byteCount = pixelCount * 3
         let rgbData = Data(bytes: rgbBytes, count: byteCount)
         var outputData = rgbData
@@ -312,8 +315,84 @@ enum BurstProcessor {
             blueGain: ccm != nil ? 1.0 : blueGain,
             exposureScale: exposureScale,
             usedCCM: ccm != nil,
+            denoised: true,
             elapsedSeconds: CFAbsoluteTimeGetCurrent() - started
         )
+    }
+
+    private static func denoiseInPlace(
+        pixels: UnsafeMutablePointer<UInt8>,
+        width: Int,
+        height: Int,
+        radius: Int = 2
+    ) {
+        let pixelCount = width * height
+        let source = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * 3)
+        source.initialize(from: pixels, count: pixelCount * 3)
+        defer {
+            source.deinitialize(count: pixelCount * 3)
+            source.deallocate()
+        }
+
+        let luma = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount)
+        luma.initialize(repeating: 0, count: pixelCount)
+        defer {
+            luma.deinitialize(count: pixelCount)
+            luma.deallocate()
+        }
+        for index in 0..<pixelCount {
+            let offset = index * 3
+            let value = 0.299 * Float(source[offset])
+                + 0.587 * Float(source[offset + 1])
+                + 0.114 * Float(source[offset + 2])
+            luma[index] = clampByte(value)
+        }
+
+        for y in 0..<height {
+            let yStart = max(0, y - radius)
+            let yEnd = min(height - 1, y + radius)
+            for x in 0..<width {
+                let centerIndex = y * width + x
+                let centerLuma = Float(luma[centerIndex])
+                let shadow = 1.0 - min(centerLuma, 110.0) / 110.0
+                let threshold = 14.0 + shadow * 20.0
+                let lumaBlend = 0.25 + shadow * 0.25
+                let xStart = max(0, x - radius)
+                let xEnd = min(width - 1, x + radius)
+                var chromaRed: Float = 0
+                var chromaBlue: Float = 0
+                var lumaSum: Float = 0
+                var weightSum: Float = 0
+                for neighborY in yStart...yEnd {
+                    let row = neighborY * width
+                    for neighborX in xStart...xEnd {
+                        let neighborIndex = row + neighborX
+                        let delta = abs(Float(luma[neighborIndex]) - centerLuma)
+                        guard delta < threshold else { continue }
+                        let weight = 1.0 - delta / threshold
+                        let offset = neighborIndex * 3
+                        let neighborLuma = Float(luma[neighborIndex])
+                        chromaRed += (Float(source[offset]) - neighborLuma) * weight
+                        chromaBlue += (Float(source[offset + 2]) - neighborLuma) * weight
+                        lumaSum += neighborLuma * weight
+                        weightSum += weight
+                    }
+                }
+                guard weightSum > 0 else { continue }
+                let outputLuma = centerLuma * (1.0 - lumaBlend) + (lumaSum / weightSum) * lumaBlend
+                let outputRed = outputLuma + chromaRed / weightSum
+                let outputBlue = outputLuma + chromaBlue / weightSum
+                let outputGreen = (outputLuma - 0.299 * outputRed - 0.114 * outputBlue) / 0.587
+                let offset = centerIndex * 3
+                pixels[offset] = clampByte(outputRed)
+                pixels[offset + 1] = clampByte(outputGreen)
+                pixels[offset + 2] = clampByte(outputBlue)
+            }
+        }
+    }
+
+    private static func clampByte(_ value: Float) -> UInt8 {
+        UInt8(min(max(value.rounded(), 0), 255))
     }
 
     private static func makeLUT(gain: Float, scale: Float) -> [UInt8] {

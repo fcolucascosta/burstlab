@@ -565,7 +565,6 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
-        let colorMatrix = burstColorMatrix
         burstFrames.removeAll()
         burstActive = false
         restoreCameraModes()
@@ -582,7 +581,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     underExposureEV: config.underExposureEV,
                     rotationAngle: rotationAngle,
                     asShotNeutral: asShotNeutral,
-                    colorMatrix: colorMatrix
+                    colorMatrix: nil
                 )
                 self.saveBurst(result)
             } catch {
@@ -646,7 +645,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                         result.elapsedSeconds, result.whiteGain, result.exposureScale,
                         shiftText
                     )
-                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) wbB=\(result.blueGain, privacy: .public) ccm=\(result.usedCCM ? 1 : 0, privacy: .public) shifts=\(shiftText, privacy: .public)")
+                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) wbB=\(result.blueGain, privacy: .public) ccm=\(result.usedCCM ? 1 : 0, privacy: .public) dn=\(result.denoised ? 1 : 0, privacy: .public) shifts=\(shiftText, privacy: .public)")
                 } else {
                         self.status = "Falha ao salvar"
                         self.lastCaptureNote = "Burst: \(error?.localizedDescription ?? "erro desconhecido")"
