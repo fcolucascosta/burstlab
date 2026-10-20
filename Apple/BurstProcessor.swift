@@ -16,6 +16,7 @@ struct BurstProcessResult {
     let frameCount: Int
     let shifts: [(dx: Int, dy: Int)]
     let whiteGain: Float
+    let blueGain: Float
     let exposureScale: Float
     let elapsedSeconds: Double
 }
@@ -46,7 +47,12 @@ enum BurstProcessor {
         }
     }
 
-    static func process(frames: [BurstFrame], underExposureEV: Double) throws -> BurstProcessResult {
+    static func process(
+        frames: [BurstFrame],
+        underExposureEV: Double,
+        rotationAngle: Int = 0,
+        asShotNeutral: [Double]? = nil
+    ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
         let height = reference.height
@@ -118,10 +124,17 @@ enum BurstProcessor {
         let meanGreenB = phaseCount[2] > 0 ? phaseSum[2] / Double(phaseCount[2]) : Double(blackLevel)
         let meanBlue = phaseCount[3] > 0 ? phaseSum[3] / Double(phaseCount[3]) : Double(blackLevel)
         let meanGreen = max((meanGreenA + meanGreenB) / 2, Double(blackLevel) + 1)
-        var redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
-        var blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
-        redGain = min(max(redGain, 0.5), 2.5)
-        blueGain = min(max(blueGain, 0.5), 2.5)
+        var redGain: Float
+        var blueGain: Float
+        if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
+            redGain = min(max(Float(neutral[1] / neutral[0]), 0.25), 4.0)
+            blueGain = min(max(Float(neutral[1] / neutral[2]), 0.25), 4.0)
+        } else {
+            redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
+            blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
+            redGain = min(max(redGain, 0.5), 2.5)
+            blueGain = min(max(blueGain, 0.5), 2.5)
+        }
 
         let greenSamples = histogram.reduce(0, +)
         var medianGreen = Double(blackLevel)
@@ -216,13 +229,27 @@ enum BurstProcessor {
 
         let byteCount = pixelCount * 3
         let rgbData = Data(bytes: rgbBytes, count: byteCount)
-        guard let provider = CGDataProvider(data: rgbData as CFData),
+        var outputData = rgbData
+        var outputWidth = width
+        var outputHeight = height
+        if rotationAngle % 360 != 0 {
+            let rotated = BurstGeometry.rotateRGB(
+                pixels: [UInt8](rgbData),
+                width: width,
+                height: height,
+                angleDegrees: rotationAngle
+            )
+            outputData = Data(rotated.pixels)
+            outputWidth = rotated.width
+            outputHeight = rotated.height
+        }
+        guard let provider = CGDataProvider(data: outputData as CFData),
               let cgImage = CGImage(
-                  width: width,
-                  height: height,
+                  width: outputWidth,
+                  height: outputHeight,
                   bitsPerComponent: 8,
                   bitsPerPixel: 24,
-                  bytesPerRow: width * 3,
+                  bytesPerRow: outputWidth * 3,
                   space: CGColorSpaceCreateDeviceRGB(),
                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
                   provider: provider,
@@ -238,11 +265,12 @@ enum BurstProcessor {
 
         return BurstProcessResult(
             jpegData: jpeg,
-            width: width,
-            height: height,
+            width: outputWidth,
+            height: outputHeight,
             frameCount: frames.count,
             shifts: shifts.map { ($0.dx, $0.dy) },
             whiteGain: redGain,
+            blueGain: blueGain,
             exposureScale: exposureScale,
             elapsedSeconds: CFAbsoluteTimeGetCurrent() - started
         )

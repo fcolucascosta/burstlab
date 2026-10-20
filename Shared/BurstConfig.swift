@@ -56,3 +56,57 @@ public struct FrameMemoryBudget: Equatable, Sendable {
         max(1, budgetBytes / max(bytesPerFrame, 1))
     }
 }
+
+public enum BurstGeometry {
+    /// Rotates an RGB888 buffer (3 bytes per pixel, row-major) clockwise by a multiple of 90 degrees.
+    public static func rotateRGB(
+        pixels: [UInt8],
+        width: Int,
+        height: Int,
+        angleDegrees: Int
+    ) -> (pixels: [UInt8], width: Int, height: Int) {
+        precondition(width > 0 && height > 0, "dimensoes invalidas")
+        precondition(pixels.count == width * height * 3, "buffer RGB de tamanho inesperado")
+        let angle = ((angleDegrees % 360) + 360) % 360
+        if angle == 0 || angle % 90 != 0 {
+            return (pixels, width, height)
+        }
+        if angle == 180 {
+            var out = [UInt8](repeating: 0, count: pixels.count)
+            for y in 0..<height {
+                let srcRow = (height - 1 - y) * width
+                let dstRow = y * width
+                for x in 0..<width {
+                    let src = (srcRow + (width - 1 - x)) * 3
+                    let dst = (dstRow + x) * 3
+                    out[dst] = pixels[src]
+                    out[dst + 1] = pixels[src + 1]
+                    out[dst + 2] = pixels[src + 2]
+                }
+            }
+            return (out, width, height)
+        }
+        let newWidth = height
+        let newHeight = width
+        var out = [UInt8](repeating: 0, count: pixels.count)
+        for y in 0..<newHeight {
+            for x in 0..<newWidth {
+                let sx: Int
+                let sy: Int
+                if angle == 90 {
+                    sx = y
+                    sy = newWidth - 1 - x
+                } else {
+                    sx = newHeight - 1 - y
+                    sy = x
+                }
+                let src = (sy * width + sx) * 3
+                let dst = (y * newWidth + x) * 3
+                out[dst] = pixels[src]
+                out[dst + 1] = pixels[src + 1]
+                out[dst + 2] = pixels[src + 2]
+            }
+        }
+        return (out, newWidth, newHeight)
+    }
+}

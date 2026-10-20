@@ -64,6 +64,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstConfig = BurstConfig.defaults(for: .photo)
     private var burstRetries = 0
     private var burstReadinessPolls = 0
+    private var burstRotationAngle = 90
+    private var burstAsShotNeutral: [Double]?
+    private var rotationCoordinatorStorage: Any?
 
     func start() {
         #if targetEnvironment(simulator)
@@ -86,6 +89,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     }
                 }
                 self.publishCapabilities()
+                if #available(iOS 17.0, *), let device = self.photoDevice {
+                    self.rotationCoordinatorStorage = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+                }
             }
         }
         #endif
@@ -372,6 +378,17 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstRemaining = self.burstConfig.frameCount
             self.burstRetries = 0
             self.burstReadinessPolls = 0
+            self.burstAsShotNeutral = nil
+            self.burstRotationAngle = 90
+            if #available(iOS 17.0, *) {
+                if let coordinator = self.rotationCoordinatorStorage as? AVCaptureDevice.RotationCoordinator {
+                    let angle = coordinator.videoRotationAngleForHorizonLevelCapture
+                    let normalized = ((Int(angle.rounded()) % 360) + 360) % 360
+                    if normalized % 90 == 0 {
+                        self.burstRotationAngle = normalized
+                    }
+                }
+            }
             self.burstStart = CFAbsoluteTimeGetCurrent()
             DispatchQueue.main.async {
                 self.isCapturingBurst = true
@@ -384,14 +401,14 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 let scaled = CMTimeMultiplyByFloat64(device.exposureDuration, multiplier: factor)
                 let duration = CMTimeMaximum(CMTimeMinimum(scaled, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
                 let iso = min(max(device.iso, device.activeFormat.minISO), device.activeFormat.maxISO)
-                self.burstLog.notice("burst start frames=\(self.burstConfig.frameCount, privacy: .public) iso=\(iso, privacy: .public) duration=\(CMTimeGetSeconds(duration), privacy: .public) ev=\(self.burstConfig.underExposureEV, privacy: .public)")
+                self.burstLog.notice("burst start frames=\(self.burstConfig.frameCount, privacy: .public) iso=\(iso, privacy: .public) duration=\(CMTimeGetSeconds(duration), privacy: .public) ev=\(self.burstConfig.underExposureEV, privacy: .public) rotation=\(self.burstRotationAngle, privacy: .public)")
                 if device.isFocusModeSupported(.locked) {
                     device.focusMode = .locked
                 }
                 let canCustom = device.isExposureModeSupported(.custom)
                 if canCustom {
                     device.setExposureModeCustom(duration: duration, iso: iso) { actual in
-                        self.burstLog.notice("exposure settled duration=\(CMTimeGetSeconds(actual), privacy: .public)")
+                        self.burstLog.notice("exposure settled value=\(actual.value, privacy: .public) timescale=\(actual.timescale, privacy: .public) seconds=\(CMTimeGetSeconds(actual), privacy: .public)")
                         self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
                             self.captureBurstFrame()
                         }
@@ -461,6 +478,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             return
         }
         burstRetries = 0
+        if burstFrames.isEmpty {
+            self.captureBurstCalibration(from: photo)
+        }
         guard let pixelBuffer = photo.pixelBuffer else {
             abortBurst("Burst sem pixel buffer RAW.")
             return
@@ -481,6 +501,37 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    private func captureBurstCalibration(from photo: AVCapturePhoto) {
+        var dng = photo.metadata[kCGImagePropertyDNGDictionary] as? [String: Any] ?? [:]
+        if dng.isEmpty, let metadata = photo.fileDataRepresentation()?.metadata {
+            dng = metadata[kCGImagePropertyDNGDictionary] as? [String: Any] ?? [:]
+        }
+        if dng.isEmpty {
+            burstLog.notice("dng metadata ausente no primeiro frame")
+            return
+        }
+        if let neutral = dng[kCGImagePropertyDNGAsShotNeutral] as? [Any] {
+            let values = neutral.compactMap { ($0 as? NSNumber)?.doubleValue }
+            if values.count == 3, values.allSatisfy({ $0 > 0 }) {
+                burstAsShotNeutral = values
+                let text = values.map { String(format: "%.4f", $0) }.joined(separator: ",")
+                burstLog.notice("as shot neutral \(text, privacy: .public)")
+            }
+        }
+        for key in [kCGImagePropertyDNGColorMatrix1, kCGImagePropertyDNGColorMatrix2] {
+            guard let matrix = dng[key] as? [Any] else { continue }
+            let values = matrix.compactMap { ($0 as? NSNumber)?.doubleValue }
+            guard values.count == 9 else { continue }
+            let text = values.map { String(format: "%.4f", $0) }.joined(separator: ",")
+            burstLog.notice("color matrix \(text, privacy: .public)")
+        }
+        let illuminant1 = dng[kCGImagePropertyDNGCalibrationIlluminant1] as? NSNumber
+        let illuminant2 = dng[kCGImagePropertyDNGCalibrationIlluminant2] as? NSNumber
+        if illuminant1 != nil || illuminant2 != nil {
+            burstLog.notice("ill1=\(illuminant1?.intValue ?? -1, privacy: .public) ill2=\(illuminant2?.intValue ?? -1, privacy: .public)")
+        }
+    }
+
     private func makeBurstFrame(from buffer: CVPixelBuffer) -> BurstFrame? {
         guard CVPixelBufferLockBaseAddress(buffer, .readOnly) == 0 else { return nil }
         defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
@@ -496,6 +547,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private func finishBurst() {
         let frames = burstFrames
         let config = burstConfig
+        let rotationAngle = burstRotationAngle
+        let asShotNeutral = burstAsShotNeutral
         burstFrames.removeAll()
         burstActive = false
         restoreCameraModes()
@@ -507,7 +560,12 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
         processingQueue.async {
             do {
-                let result = try BurstProcessor.process(frames: frames, underExposureEV: config.underExposureEV)
+                let result = try BurstProcessor.process(
+                    frames: frames,
+                    underExposureEV: config.underExposureEV,
+                    rotationAngle: rotationAngle,
+                    asShotNeutral: asShotNeutral
+                )
                 self.saveBurst(result)
             } catch {
                 self.burstLog.notice("process error \(error.localizedDescription, privacy: .public)")
@@ -570,7 +628,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                         result.elapsedSeconds, result.whiteGain, result.exposureScale,
                         shiftText
                     )
-                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) shifts=\(shiftText, privacy: .public)")
+                    self.burstLog.notice("saved \(result.jpegData.count, privacy: .public) bytes proc=\(result.elapsedSeconds, privacy: .public) scale=\(result.exposureScale, privacy: .public) wbR=\(result.whiteGain, privacy: .public) wbB=\(result.blueGain, privacy: .public) shifts=\(shiftText, privacy: .public)")
                 } else {
                         self.status = "Falha ao salvar"
                         self.lastCaptureNote = "Burst: \(error?.localizedDescription ?? "erro desconhecido")"
