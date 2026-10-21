@@ -210,11 +210,15 @@ public enum BurstColorMatrix {
             let inverseTemperature = 1.0 / temperature
             weight = (inverseTemperature - 1.0 / upper) / (1.0 / lower - 1.0 / upper)
         }
-        return (0..<3).map { row in
-            (0..<3).map { column in
-                first[row][column] * weight + second[row][column] * (1 - weight)
+        var result = [[Double]](repeating: [0, 0, 0], count: 3)
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let firstValue = first[row][column]
+                let secondValue = second[row][column]
+                result[row][column] = firstValue * weight + secondValue * (1 - weight)
             }
         }
+        return result
     }
 
     private static func correlatedColorTemperature(x: Double, y: Double) -> Double {
@@ -255,29 +259,52 @@ public enum BurstColorMatrix {
     }
 
     private static func multiply(_ a: [[Double]], _ b: [[Double]]) -> [[Double]] {
-        (0..<3).map { row in
-            (0..<3).map { column in
-                a[row][0] * b[0][column] + a[row][1] * b[1][column] + a[row][2] * b[2][column]
+        var result = [[Double]](repeating: [0, 0, 0], count: 3)
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let first = a[row][0] * b[0][column]
+                let second = a[row][1] * b[1][column]
+                let third = a[row][2] * b[2][column]
+                result[row][column] = first + second + third
             }
         }
+        return result
     }
 
     private static func multiply(_ a: [[Double]], _ v: [Double]) -> [Double] {
-        (0..<3).map { row in
-            a[row][0] * v[0] + a[row][1] * v[1] + a[row][2] * v[2]
+        var result = [Double](repeating: 0, count: 3)
+        for row in 0..<3 {
+            let first = a[row][0] * v[0]
+            let second = a[row][1] * v[1]
+            let third = a[row][2] * v[2]
+            result[row] = first + second + third
         }
+        return result
     }
 
     private static func invert(_ m: [[Double]]) -> [[Double]]? {
         let a = m[0][0], b = m[0][1], c = m[0][2]
         let d = m[1][0], e = m[1][1], f = m[1][2]
         let g = m[2][0], h = m[2][1], i = m[2][2]
-        let determinant = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
+        let ei = e * i, fh = f * h
+        let di = d * i, fg = f * g
+        let dh = d * h, eg = e * g
+        let determinant = a * (ei - fh) - b * (di - fg) + c * (dh - eg)
         guard abs(determinant) > 1e-12 else { return nil }
+        let inverse = 1.0 / determinant
+        let m00 = (ei - fh) * inverse
+        let m01 = (c * h - b * i) * inverse
+        let m02 = (b * f - c * e) * inverse
+        let m10 = (fg - di) * inverse
+        let m11 = (a * i - c * g) * inverse
+        let m12 = (c * d - a * f) * inverse
+        let m20 = (dh - eg) * inverse
+        let m21 = (b * g - a * h) * inverse
+        let m22 = (a * e - b * d) * inverse
         return [
-            [(e * i - f * h) / determinant, (c * h - b * i) / determinant, (b * f - c * e) / determinant],
-            [(f * g - d * i) / determinant, (a * i - c * g) / determinant, (c * d - a * f) / determinant],
-            [(d * h - e * g) / determinant, (b * g - a * h) / determinant, (a * e - b * d) / determinant]
+            [m00, m01, m02],
+            [m10, m11, m12],
+            [m20, m21, m22]
         ]
     }
 }
