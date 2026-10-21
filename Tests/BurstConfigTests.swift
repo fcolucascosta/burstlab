@@ -67,27 +67,69 @@ final class BurstConfigTests: XCTestCase {
         XCTAssertEqual(normalized.height, 2)
     }
 
-    func testColorMatrixMapsNeutralToWhite() {
-        let matrix: [Double] = [0.83, -0.2739, -0.0971, -0.5732, 1.3636, 0.1709, -0.0864, 0.1364, 0.5364]
-        let neutral: [Double] = [0.4045, 1.0, 0.5439]
-        guard let ccm = BurstColorMatrix.calibratedForNeutral(matrix: matrix, neutral: neutral) else {
-            return XCTFail("matriz deveria ser valida")
+    private let colorMatrix1: [Double] = [
+        1.5069, -0.8881, -0.1335,
+        -0.5356, 1.5421, 0.1474,
+        -0.0192, 0.0953, 0.7604
+    ]
+    private let colorMatrix2: [Double] = [
+        0.8300, -0.2739, -0.0971,
+        -0.5732, 1.3636, 0.1709,
+        -0.0864, 0.1364, 0.5364
+    ]
+
+    func testCameraToSRGBMapsNeutralToWhite() {
+        let neutral: [Double] = [0.4836, 1.0, 0.5069]
+        guard let transform = BurstColorMatrix.cameraToSRGB(
+            matrix1: colorMatrix1,
+            matrix2: colorMatrix2,
+            neutral: neutral
+        ) else {
+            return XCTFail("transformacao deveria ser valida")
         }
         for row in 0..<3 {
-            let dot = ccm[row * 3] * neutral[0]
-                + ccm[row * 3 + 1] * neutral[1]
-                + ccm[row * 3 + 2] * neutral[2]
+            let dot = transform[row * 3] * neutral[0]
+                + transform[row * 3 + 1] * neutral[1]
+                + transform[row * 3 + 2] * neutral[2]
             XCTAssertEqual(dot, 1.0, accuracy: 1e-9)
         }
     }
 
-    func testColorMatrixRejectsInvalidInput() {
-        XCTAssertNil(BurstColorMatrix.calibratedForNeutral(matrix: [1, 2, 3], neutral: [1, 1, 1]))
+    func testCameraToSRGBRecoversD65Red() {
+        let neutral: [Double] = [0.407281, 1.0, 0.635233]
+        guard let transform = BurstColorMatrix.cameraToSRGB(
+            matrix1: colorMatrix1,
+            matrix2: colorMatrix2,
+            neutral: neutral
+        ) else {
+            return XCTFail("transformacao deveria ser valida")
+        }
+        let cameraRed: [Double] = [0.28221, 0.056885, 0.003743]
+        for row in 0..<3 {
+            let value = transform[row * 3] * cameraRed[0]
+                + transform[row * 3 + 1] * cameraRed[1]
+                + transform[row * 3 + 2] * cameraRed[2]
+            XCTAssertEqual(value, row == 0 ? 1.0 : 0.0, accuracy: 0.01)
+        }
+    }
+
+    func testCameraToSRGBRejectsInvalidInput() {
+        XCTAssertNil(BurstColorMatrix.cameraToSRGB(matrix1: [1, 2, 3], matrix2: colorMatrix2, neutral: [1, 1, 1]))
+        XCTAssertNil(BurstColorMatrix.cameraToSRGB(matrix1: colorMatrix1, matrix2: colorMatrix2, neutral: [0, 1, 1]))
         XCTAssertNil(
-            BurstColorMatrix.calibratedForNeutral(
-                matrix: [0.83, -0.2739, -0.0971, -0.5732, 1.3636, 0.1709, -0.0864, 0.1364, 0.5364],
-                neutral: [0, 1, 1]
+            BurstColorMatrix.cameraToSRGB(
+                matrix1: colorMatrix1,
+                matrix2: colorMatrix2,
+                neutral: [1, 1, 1],
+                temperature1: 6504,
+                temperature2: 6504
             )
         )
+    }
+
+    func testIlluminantTemperatures() {
+        XCTAssertEqual(BurstColorMatrix.temperature(forIlluminant: 17), 2856)
+        XCTAssertEqual(BurstColorMatrix.temperature(forIlluminant: 21), 6504)
+        XCTAssertNil(BurstColorMatrix.temperature(forIlluminant: 0))
     }
 }

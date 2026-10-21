@@ -66,7 +66,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
     private var burstAsShotNeutral: [Double]?
-    private var burstColorMatrix: [Double]?
+    private var burstColorMatrix1: [Double]?
+    private var burstColorMatrix2: [Double]?
+    private var burstIlluminant1 = 17
+    private var burstIlluminant2 = 21
     private var rotationCoordinatorStorage: Any?
 
     func start() {
@@ -380,7 +383,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstRetries = 0
             self.burstReadinessPolls = 0
             self.burstAsShotNeutral = nil
-            self.burstColorMatrix = nil
+            self.burstColorMatrix1 = nil
+            self.burstColorMatrix2 = nil
+            self.burstIlluminant1 = 17
+            self.burstIlluminant2 = 21
             self.burstRotationAngle = 90
             if #available(iOS 17.0, *) {
                 if let coordinator = self.rotationCoordinatorStorage as? AVCaptureDevice.RotationCoordinator {
@@ -536,14 +542,11 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         if illuminant1 > 0 || illuminant2 > 0 {
             burstLog.notice("ill1=\(illuminant1, privacy: .public) ill2=\(illuminant2, privacy: .public)")
         }
-        if illuminant2 == 21 {
-            burstColorMatrix = cm2 ?? cm1
-        } else if illuminant1 == 21 {
-            burstColorMatrix = cm1 ?? cm2
-        } else {
-            burstColorMatrix = cm2 ?? cm1
-        }
-        if burstColorMatrix == nil {
+        burstColorMatrix1 = cm1 ?? cm2
+        burstColorMatrix2 = cm2 ?? cm1
+        burstIlluminant1 = illuminant1 > 0 ? illuminant1 : 17
+        burstIlluminant2 = illuminant2 > 0 ? illuminant2 : 21
+        if burstColorMatrix1 == nil || burstColorMatrix2 == nil {
             burstLog.notice("matriz de cor ausente no dng")
         }
     }
@@ -565,6 +568,26 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
+        let matrix1 = burstColorMatrix1
+        let matrix2 = burstColorMatrix2
+        let temperature1 = BurstColorMatrix.temperature(forIlluminant: burstIlluminant1) ?? 2856
+        let temperature2 = BurstColorMatrix.temperature(forIlluminant: burstIlluminant2) ?? 6504
+        var colorTransform: [Double]?
+        if let matrix1, let matrix2, let asShotNeutral {
+            colorTransform = BurstColorMatrix.cameraToSRGB(
+                matrix1: matrix1,
+                matrix2: matrix2,
+                neutral: asShotNeutral,
+                temperature1: temperature1,
+                temperature2: temperature2
+            )
+        }
+        if let colorTransform {
+            let text = colorTransform.map { String(format: "%.4f", $0) }.joined(separator: ",")
+            burstLog.notice("camera to sRGB \(text, privacy: .public)")
+        } else {
+            burstLog.notice("camera to sRGB indisponivel; usando gray-world")
+        }
         burstFrames.removeAll()
         burstActive = false
         restoreCameraModes()
@@ -581,7 +604,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     underExposureEV: config.underExposureEV,
                     rotationAngle: rotationAngle,
                     asShotNeutral: asShotNeutral,
-                    colorMatrix: nil
+                    colorTransform: colorTransform
                 )
                 self.saveBurst(result)
             } catch {

@@ -54,7 +54,7 @@ enum BurstProcessor {
         underExposureEV: Double,
         rotationAngle: Int = 0,
         asShotNeutral: [Double]? = nil,
-        colorMatrix: [Double]? = nil
+        colorTransform: [Double]? = nil
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -147,8 +147,8 @@ enum BurstProcessor {
         let exposureScale = Float(min(max(0.18 / medianNorm, 0.5), 24.0))
 
         var ccm: [Double]? = nil
-        if let neutral = asShotNeutral, let matrix = colorMatrix {
-            ccm = BurstColorMatrix.calibratedForNeutral(matrix: matrix, neutral: neutral)
+        if let transform = colorTransform, transform.count == 9 {
+            ccm = transform
         }
         if ccm == nil {
             if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
@@ -177,7 +177,7 @@ enum BurstProcessor {
         if ccm != nil {
             var table = [UInt8](repeating: 0, count: 4097)
             for index in 0...4096 {
-                table[index] = UInt8((pow(Double(index) / 4096.0, 1.0 / 2.2) * 255.0).rounded())
+                table[index] = srgbByte(Double(index) / 4096.0)
             }
             gammaTable = table
         } else {
@@ -292,7 +292,7 @@ enum BurstProcessor {
                   bitsPerComponent: 8,
                   bitsPerPixel: 24,
                   bytesPerRow: outputWidth * 3,
-                  space: CGColorSpaceCreateDeviceRGB(),
+                  space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(),
                   bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.none.rawValue),
                   provider: provider,
                   decode: nil,
@@ -324,7 +324,7 @@ enum BurstProcessor {
         pixels: UnsafeMutablePointer<UInt8>,
         width: Int,
         height: Int,
-        radius: Int = 2
+        radius: Int = 3
     ) {
         let pixelCount = width * height
         let source = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * 3)
@@ -397,13 +397,19 @@ enum BurstProcessor {
 
     private static func makeLUT(gain: Float, scale: Float) -> [UInt8] {
         var lut = [UInt8](repeating: 0, count: 65536)
-        let invGamma = 1.0 / 2.2
         for value in 0..<65536 {
             let linear = max(0, (Float(value) - blackLevel) / usefullRange * scale * gain)
-            let clamped = min(1, linear)
-            lut[value] = UInt8((pow(Double(clamped), invGamma) * 255.0).rounded())
+            lut[value] = srgbByte(Double(min(1, linear)))
         }
         return lut
+    }
+
+    private static func srgbByte(_ linear: Double) -> UInt8 {
+        let clamped = min(max(linear, 0), 1)
+        let encoded = clamped <= 0.0031308
+            ? 12.92 * clamped
+            : 1.055 * pow(clamped, 1.0 / 2.4) - 0.055
+        return UInt8((encoded * 255.0).rounded())
     }
 
     private static func estimateShift(reference: BurstFrame, frame: BurstFrame) -> Shift {
