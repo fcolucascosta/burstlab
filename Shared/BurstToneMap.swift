@@ -59,10 +59,10 @@ public struct BurstToneMap {
         let lifted = luminance * min(max(gain, 1), 2)
         let output = lifted <= 0.65 ? lifted : 0.65 + 0.35 * (1 - exp(-(lifted - 0.65) / 0.35))
         let scale = output / luminance
-        // A deliberate, modest look adjustment, not a sensor color calibration.
-        let dr = (red * scale - output) * 1.15
-        let dg = (green * scale - output) * 1.15
-        let db = (blue * scale - output) * 1.15
+        // Gamut compression here; perceptual chroma follows denoising later.
+        let dr = red * scale - output
+        let dg = green * scale - output
+        let db = blue * scale - output
         var saturation = 1.0
         for delta in [dr, dg, db] {
             if delta > 1e-8 { saturation = min(saturation, (1 - output) / delta) }

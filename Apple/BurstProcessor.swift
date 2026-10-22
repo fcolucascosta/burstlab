@@ -275,6 +275,19 @@ enum BurstProcessor {
         let renderedAt = CFAbsoluteTimeGetCurrent()
         denoiseInPlace(pixels: rgbBytes, width: width, height: height)
         let denoisedAt = CFAbsoluteTimeGetCurrent()
+        let decode = (0...255).map { value -> Double in
+            let v = Double(value) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        for index in 0..<pixelCount {
+            let i = index * 3
+            let color = BurstColorLook.apply(red: decode[Int(rgbBytes[i])],
+                                             green: decode[Int(rgbBytes[i + 1])], blue: decode[Int(rgbBytes[i + 2])])
+            rgbBytes[i] = gammaTable[gammaIndex(color.0)]
+            rgbBytes[i + 1] = gammaTable[gammaIndex(color.1)]
+            rgbBytes[i + 2] = gammaTable[gammaIndex(color.2)]
+        }
+        let coloredAt = CFAbsoluteTimeGetCurrent()
 
         let byteCount = pixelCount * 3
         let rgbData = Data(bytes: rgbBytes, count: byteCount)
@@ -327,7 +340,8 @@ enum BurstProcessor {
             elapsedSeconds: finishedAt - started,
             stageSeconds: ["alignment": alignedAt - started, "fusion": fusedAt - alignedAt,
                            "metering_tone_map": meteredAt - fusedAt, "demosaic_render": renderedAt - meteredAt,
-                           "chroma_filter": denoisedAt - renderedAt, "rotation_jpeg": finishedAt - denoisedAt],
+                           "chroma_filter": denoisedAt - renderedAt, "perceptual_color": coloredAt - denoisedAt,
+                           "rotation_jpeg": finishedAt - coloredAt],
             exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
                             "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
                             "adjustment_over_luminance_median_ev": meter.adjustmentEV]
