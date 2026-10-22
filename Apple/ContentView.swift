@@ -4,7 +4,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var camera = CameraController()
     @State private var showReport = false
-    @State private var recordDiagnostics = false
+    @AppStorage("recordDiagnostics") private var recordDiagnostics = false
 
     var body: some View {
         ZStack {

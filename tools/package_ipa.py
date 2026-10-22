@@ -103,8 +103,9 @@ def package(app, output=None):
         "scope": (
             "iPhone only. Single JPEG capture and RAW burst probe; experimental eight-frame RAW pipeline "
             "with even-pixel translation alignment, reference-anchored frequency merge, demosaic, DNG-derived color "
-            "transform with fallback white balance, global exposure normalization and spatial denoise. "
-            "Robust motion rejection, night and long exposure are not implemented. Image quality, peak "
+            "transform with fallback white balance, bounded local SDR tone mapping and chroma denoise. "
+            "Frequency-based motion rejection is experimental; local/subpixel alignment, HDR gain maps, "
+            "night and long exposure are not implemented. Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),
     }
