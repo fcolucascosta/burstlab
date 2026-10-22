@@ -2,6 +2,21 @@ import Foundation
 
 /// Opt-in capture evidence. No uploads; files stay in the app's Documents folder.
 enum BurstDiagnostics {
+    static func saveProcessing(_ result: BurstProcessResult, directory: URL, noiseProfile: [Double]?) throws {
+        var report: [String: Any] = [
+            "schema_version": 1,
+            "elapsed_processing_seconds": result.elapsedSeconds,
+            "stage_seconds": result.stageSeconds,
+            "exposure_meter": result.exposureMeter,
+            "noise_metadata_available": noiseProfile?.count == 2,
+            "shifts": result.shifts.map { ["dx": $0.dx, "dy": $0.dy] },
+            "limitations": "Timing excludes RAW export and photo-library save. No peak-memory or image-quality measurement."
+        ]
+        if let noiseProfile { report["noise_profile"] = noiseProfile }
+        let json = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
+        try json.write(to: directory.appendingPathComponent("processing.json"), options: .atomic)
+    }
+
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
                      neutral: [Double]?, transform: [Double]?) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,

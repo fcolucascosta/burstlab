@@ -16,6 +16,8 @@ struct BurstProcessResult {
     let usedCCM: Bool
     let denoised: Bool
     let elapsedSeconds: Double
+    let stageSeconds: [String: Double]
+    let exposureMeter: [String: Double]
 }
 
 enum BurstProcessor {
@@ -67,6 +69,7 @@ enum BurstProcessor {
         let shifts = frames.enumerated().map { index, frame in
             index == 0 ? Shift(dx: 0, dy: 0) : estimateShift(reference: reference, frame: frame)
         }
+        let alignedAt = CFAbsoluteTimeGetCurrent()
         let merged = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount)
         merged.initialize(repeating: 0, count: pixelCount)
         do {
@@ -82,6 +85,7 @@ enum BurstProcessor {
             merged.deinitialize(count: pixelCount)
             merged.deallocate()
         }
+        let fusedAt = CFAbsoluteTimeGetCurrent()
 
         var phaseSum = [Double](repeating: 0, count: 4)
         var phaseCount = [Int](repeating: 0, count: 4)
@@ -127,7 +131,7 @@ enum BurstProcessor {
             }
         }
         let medianNorm = max((medianGreen - Double(blackLevel)) / Double(usefullRange), 0.002)
-        let exposureScale = Float(min(max(0.18 / medianNorm, 0.5), 24.0))
+        let legacyExposureScale = min(max(0.18 / medianNorm, 0.5), 24.0)
 
         var ccm: [Double]? = nil
         if let transform = colorTransform, transform.count == 9, transform.allSatisfy({ $0.isFinite }) {
@@ -146,18 +150,17 @@ enum BurstProcessor {
         }
 
         let rangeD = Double(usefullRange)
-        let scaleD = Double(exposureScale)
         let blackInt = Int(blackLevel)
         func linearRGB(_ red: Int, _ green: Int, _ blue: Int) -> (Double, Double, Double) {
             let lr = Double(max(red, 0) - blackInt) / rangeD
             let lg = Double(max(green, 0) - blackInt) / rangeD
             let lb = Double(max(blue, 0) - blackInt) / rangeD
             if let cc = ccm {
-                return ((cc[0] * lr + cc[1] * lg + cc[2] * lb) * scaleD,
-                        (cc[3] * lr + cc[4] * lg + cc[5] * lb) * scaleD,
-                        (cc[6] * lr + cc[7] * lg + cc[8] * lb) * scaleD)
+                return (cc[0] * lr + cc[1] * lg + cc[2] * lb,
+                        cc[3] * lr + cc[4] * lg + cc[5] * lb,
+                        cc[6] * lr + cc[7] * lg + cc[8] * lb)
             }
-            return (lr * Double(redGain) * scaleD, lg * scaleD, lb * Double(blueGain) * scaleD)
+            return (lr * Double(redGain), lg, lb * Double(blueGain))
         }
         // A 16x16-sensor-pixel thumbnail keeps local adaptation small in memory.
         // Average linear luminance before taking logarithms in BurstToneMap.
@@ -181,7 +184,11 @@ enum BurstProcessor {
                 thumbnail[ty * toneWidth + tx] = count > 0 ? sum / Double(count) : 0
             }
         }
-        let tone = try BurstToneMap(luminances: thumbnail, width: toneWidth, height: toneHeight)
+        let meter = try BurstExposure(luminances: thumbnail)
+        let exposureScale = Float(meter.scale)
+        let scaleD = meter.scale
+        let tone = try BurstToneMap(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth, height: toneHeight)
+        let meteredAt = CFAbsoluteTimeGetCurrent()
         func gammaIndex(_ value: Double) -> Int {
             let clamped = min(max(value, 0), 1)
             return min(Int(clamped * 4096.0), 4096)
@@ -257,14 +264,17 @@ enum BurstProcessor {
                 let linear = linearRGB(red, green, blue)
                 let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
                                      y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
-                let rendered = BurstToneMap.render(red: linear.0, green: linear.1, blue: linear.2, gain: gain)
+                let rendered = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
+                                                   blue: linear.2 * scaleD, gain: gain)
                 rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
                 rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
                 rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]
             }
         }
 
+        let renderedAt = CFAbsoluteTimeGetCurrent()
         denoiseInPlace(pixels: rgbBytes, width: width, height: height)
+        let denoisedAt = CFAbsoluteTimeGetCurrent()
 
         let byteCount = pixelCount * 3
         let rgbData = Data(bytes: rgbBytes, count: byteCount)
@@ -302,6 +312,7 @@ enum BurstProcessor {
             throw BurstError.jpegEncoding
         }
 
+        let finishedAt = CFAbsoluteTimeGetCurrent()
         return BurstProcessResult(
             jpegData: jpeg,
             width: outputWidth,
@@ -313,7 +324,13 @@ enum BurstProcessor {
             exposureScale: exposureScale,
             usedCCM: ccm != nil,
             denoised: true,
-            elapsedSeconds: CFAbsoluteTimeGetCurrent() - started
+            elapsedSeconds: finishedAt - started,
+            stageSeconds: ["alignment": alignedAt - started, "fusion": fusedAt - alignedAt,
+                           "metering_tone_map": meteredAt - fusedAt, "demosaic_render": renderedAt - meteredAt,
+                           "chroma_filter": denoisedAt - renderedAt, "rotation_jpeg": finishedAt - denoisedAt],
+            exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
+                            "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
+                            "adjustment_over_luminance_median_ev": meter.adjustmentEV]
         )
     }
 

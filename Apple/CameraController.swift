@@ -657,11 +657,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.lastCaptureNote = "Burst: \(frames.count) frames, alinhando e combinando..."
         }
         processingQueue.async {
+            var diagnosticDirectory: URL?
             if recordDiagnostics {
                 do {
                     let directory = try BurstDiagnostics.save(frames: frames, referenceDNG: referenceDNG,
                                                               rotation: rotationAngle, neutral: asShotNeutral,
                                                               transform: colorTransform)
+                    diagnosticDirectory = directory
                     DispatchQueue.main.async {
                         self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
                     }
@@ -678,6 +680,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     colorTransform: colorTransform,
                     noiseProfile: noiseProfile
                 )
+                if let directory = diagnosticDirectory {
+                    do {
+                        try BurstDiagnostics.saveProcessing(result, directory: directory, noiseProfile: noiseProfile)
+                    } catch {
+                        self.burstLog.notice("processing report failed: \(error.localizedDescription, privacy: .public)")
+                    }
+                }
                 self.saveBurst(result)
             } catch {
                 self.completeBurstProcessing()
