@@ -70,6 +70,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstFormat: OSType = 0
     private var burstStart: CFTimeInterval = 0
     private var burstConfig = BurstConfig.defaults(for: .photo)
+    private var burstPlan: BurstCapturePlan?
+    private var burstExposureReadings: [[String: Double]] = []
     private var burstRetries = 0
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
@@ -383,7 +385,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
-    func captureBurst(recordDiagnostics: Bool = false) {
+    func captureBurst(mode: CaptureMode = .photo, recordDiagnostics: Bool = false) {
         sessionQueue.async {
             self.burstLog.notice("captureBurst configured=\(self.configured, privacy: .public) running=\(self.session.isRunning, privacy: .public) probe=\(self.probeActive, privacy: .public) burst=\(self.burstActive, privacy: .public)")
             guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive, !self.processingActive, !self.singleCaptureActive else { return }
@@ -392,16 +394,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 return
             }
             let rawFormat = kCVPixelFormatType_14Bayer_RGGB
-            guard let device = self.photoDevice else { return }
-            self.burstConfig = BurstConfig.defaults(for: .photo)
+            guard self.photoDevice != nil else { return }
+            self.burstConfig = BurstConfig.defaults(for: mode)
             self.burstActive = true
             self.burstGeneration = UUID()
             let generation = self.burstGeneration
-            self.sessionQueue.asyncAfter(deadline: .now() + 15) {
-                if self.burstActive && self.burstGeneration == generation {
-                    self.abortBurst("Tempo limite do burst excedido.")
-                }
-            }
+            self.burstPlan = nil
+            self.burstExposureReadings.removeAll()
             self.burstFormat = rawFormat
             self.burstFrames.removeAll()
             self.burstRemaining = self.burstConfig.frameCount
@@ -432,13 +431,50 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 self.lastCaptureNote = ""
                 self.diagnosticNote = ""
             }
-            do {
+            self.prepareBurstExposure(generation: generation)
+        }
+    }
+
+    private func prepareBurstExposure(generation: UUID, polls: Int = 0) {
+        guard burstActive, burstGeneration == generation, let device = photoDevice else { return }
+        if burstConfig.mode != .photo && (device.isAdjustingExposure || device.isAdjustingFocus || device.isAdjustingWhiteBalance) {
+            guard polls < 30 else {
+                abortBurst("A camera nao estabilizou foco/exposicao. Aponte para uma area com contraste e tente novamente.")
+                return
+            }
+            sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                self.prepareBurstExposure(generation: generation, polls: polls + 1)
+            }
+            return
+        }
+        guard let plan = BurstCapturePlan.make(mode: burstConfig.mode,
+            previewDuration: CMTimeGetSeconds(device.exposureDuration), previewISO: Double(device.iso),
+            minDuration: CMTimeGetSeconds(device.activeFormat.minExposureDuration),
+            maxDuration: CMTimeGetSeconds(device.activeFormat.maxExposureDuration),
+            minISO: Double(device.activeFormat.minISO), maxISO: Double(device.activeFormat.maxISO)) else {
+            abortBurst("Limites de exposicao invalidos para esta captura.")
+            return
+        }
+        if burstConfig.mode != .photo && !device.isExposureModeSupported(.custom) {
+            abortBurst("Este formato nao permite controlar a exposicao para o modo de tripe.")
+            return
+        }
+        burstPlan = plan
+        sessionQueue.asyncAfter(deadline: .now() + plan.timeoutSeconds) {
+            if self.burstActive && self.burstGeneration == generation { self.abortBurst("Tempo limite da captura excedido.") }
+        }
+        let settleDelay = burstConfig.mode == .photo ? 0.4 : 2.0
+        DispatchQueue.main.async {
+            self.status = plan.config.mode == .photo ? "Preparando foto..." : "Mantenha o tripe parado; iniciando em 2 s..."
+            self.lastCaptureNote = String(format: "%@ • %d fotos de %.3f s • ISO %.0f • %.2f s de luz planejados",
+                                         plan.config.mode.title, plan.config.frameCount, plan.duration, plan.iso, plan.integrationSeconds)
+        }
+        do {
                 try device.lockForConfiguration()
                 self.savedCameraModes = (device.exposureMode, device.focusMode, device.whiteBalanceMode)
-                let factor = pow(2.0, self.burstConfig.underExposureEV)
-                let scaled = CMTimeMultiplyByFloat64(device.exposureDuration, multiplier: factor)
-                let duration = CMTimeMaximum(CMTimeMinimum(scaled, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
-                let iso = min(max(device.iso, device.activeFormat.minISO), device.activeFormat.maxISO)
+                let requested = CMTime(seconds: plan.duration, preferredTimescale: 1_000_000_000)
+                let duration = CMTimeMaximum(CMTimeMinimum(requested, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
+                let iso = min(max(Float(plan.iso), device.activeFormat.minISO), device.activeFormat.maxISO)
                 self.burstLog.notice("burst start frames=\(self.burstConfig.frameCount, privacy: .public) iso=\(iso, privacy: .public) duration=\(CMTimeGetSeconds(duration), privacy: .public) ev=\(self.burstConfig.underExposureEV, privacy: .public) rotation=\(self.burstRotationAngle, privacy: .public)")
                 if device.isFocusModeSupported(.locked) {
                     device.focusMode = .locked
@@ -449,8 +485,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 let canCustom = device.isExposureModeSupported(.custom)
                 if canCustom {
                     device.setExposureModeCustom(duration: duration, iso: iso) { actual in
-                        self.burstLog.notice("exposure settled value=\(actual.value, privacy: .public) timescale=\(actual.timescale, privacy: .public) seconds=\(CMTimeGetSeconds(actual), privacy: .public)")
-                        self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
+                        self.burstLog.notice("exposure settings synchronized at=\(CMTimeGetSeconds(actual), privacy: .public)")
+                        self.sessionQueue.asyncAfter(deadline: .now() + settleDelay) {
                             guard self.burstGeneration == generation else { return }
                             self.captureBurstFrame()
                         }
@@ -460,7 +496,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 }
                 device.unlockForConfiguration()
                 if !canCustom {
-                    self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
+                    self.sessionQueue.asyncAfter(deadline: .now() + settleDelay) {
                         guard self.burstGeneration == generation else { return }
                         self.captureBurstFrame()
                     }
@@ -468,7 +504,6 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             } catch {
                 self.abortBurst("Falha ao travar exposicao: \(error.localizedDescription)")
             }
-        }
     }
 
     private func captureBurstFrame() {
@@ -496,6 +531,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
         burstReadinessPolls = 0
         let frameNumber = burstConfig.frameCount - burstRemaining + 1
+        let modeTitle = burstConfig.mode.title
+        let total = burstConfig.frameCount
+        DispatchQueue.main.async { self.status = "\(modeTitle): capturando \(frameNumber)/\(total)..." }
         burstLog.notice("request frame \(frameNumber, privacy: .public)/\(self.burstConfig.frameCount, privacy: .public)")
         let settings = AVCapturePhotoSettings(rawPixelFormatType: burstFormat)
         settings.photoQualityPrioritization = .speed
@@ -544,6 +582,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             return
         }
         burstFrames.append(frame)
+        let exif = photo.metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
+        var reading: [String: Double] = ["frame_index": Double(burstExposureReadings.count)]
+        if let seconds = exif[kCGImagePropertyExifExposureTime as String] as? NSNumber,
+           seconds.doubleValue.isFinite, seconds.doubleValue > 0 { reading["duration_seconds"] = seconds.doubleValue }
+        if let values = exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber], let iso = values.first,
+           iso.doubleValue.isFinite, iso.doubleValue > 0 { reading["iso"] = iso.doubleValue }
+        burstExposureReadings.append(reading)
         burstRemaining -= 1
         let captured = burstConfig.frameCount - burstRemaining
         burstLog.notice("frame \(captured, privacy: .public)/\(self.burstConfig.frameCount, privacy: .public) received \(frame.data.count, privacy: .public) bytes")
@@ -621,6 +666,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private func finishBurst() {
         let frames = burstFrames
         let config = burstConfig
+        let plan = burstPlan
+        let exposureReadings = burstExposureReadings
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
         let noiseProfile = burstNoiseProfile
@@ -662,7 +709,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 do {
                     let directory = try BurstDiagnostics.save(frames: frames, referenceDNG: referenceDNG,
                                                               rotation: rotationAngle, neutral: asShotNeutral,
-                                                              transform: colorTransform)
+                                                              transform: colorTransform, config: config, plan: plan,
+                                                              exposureReadings: exposureReadings)
                     diagnosticDirectory = directory
                     DispatchQueue.main.async {
                         self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
@@ -678,7 +726,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     rotationAngle: rotationAngle,
                     asShotNeutral: asShotNeutral,
                     colorTransform: colorTransform,
-                    noiseProfile: noiseProfile
+                    noiseProfile: noiseProfile,
+                    usesRobustMerge: config.usesRobustMerge
                 )
                 if let directory = diagnosticDirectory {
                     do {

@@ -101,11 +101,13 @@ def package(app, output=None):
         "ipa_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "installation": "Must be signed locally before installation on iPhone",
         "scope": (
-            "iPhone only. Single JPEG capture and RAW burst probe; experimental eight-frame RAW pipeline "
+            "iPhone only. Single JPEG reference and RAW probe; experimental 8-frame Photo and 16-frame tripod modes "
             "with even-pixel translation alignment, reference-anchored frequency merge, demosaic, DNG-derived color "
             "transform with fallback white balance, bounded local SDR tone mapping and chroma denoise. "
             "Frequency-based motion rejection is experimental; local/subpixel alignment, HDR gain maps, "
-            "night and long exposure are not implemented. Image quality, peak "
+            "automatic tripod detection and handheld night are not implemented. Explicit Night trades shutter "
+            "duration (up to 0.5 s/frame) for lower ISO with robust fusion; Long uses equal-weight accumulation "
+            "for motion trails. Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),
     }

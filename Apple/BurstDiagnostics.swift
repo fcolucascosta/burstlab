@@ -18,7 +18,8 @@ enum BurstDiagnostics {
     }
 
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
-                     neutral: [Double]?, transform: [Double]?) throws -> URL {
+                     neutral: [Double]?, transform: [Double]?, config: BurstConfig,
+                     plan: BurstCapturePlan?, exposureReadings: [[String: Double]]) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,
                                                    in: .userDomainMask, appropriateFor: nil, create: true)
         let directory = documents.appendingPathComponent("Ensaios", isDirectory: true)
@@ -35,7 +36,7 @@ enum BurstDiagnostics {
             try referenceDNG.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic)
         }
         var manifest: [String: Any] = [
-            "schema_version": 1,
+            "schema_version": 2,
             "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             "created_at": ISO8601DateFormatter().string(from: Date()),
             "pixel_format": "rgg4", "storage": "little-endian UInt16, row stride included",
@@ -43,10 +44,23 @@ enum BurstDiagnostics {
             "rotation_degrees_clockwise": rotation,
             "reference_dng_available": referenceDNG != nil,
             "frames": entries,
+            "capture_mode": config.mode.rawValue,
+            "merge": config.usesRobustMerge ? "reference_anchored_spectral" : "aligned_equal_weight_average",
+            "requested_frame_count": config.frameCount,
+            "actual_exposures": exposureReadings,
             "limitations": "Fixed sensor levels are historical assumptions; no measured quality claim."
         ]
         if let neutral { manifest["as_shot_neutral"] = neutral }
         if let transform { manifest["camera_to_linear_srgb"] = transform }
+        if let plan {
+            manifest["capture_plan"] = ["duration_seconds": plan.duration, "iso": plan.iso,
+                                        "integration_seconds": plan.integrationSeconds,
+                                        "timeout_seconds": plan.timeoutSeconds]
+        }
+        if exposureReadings.count == frames.count,
+           exposureReadings.allSatisfy({ $0["duration_seconds"] != nil }) {
+            manifest["measured_integration_seconds"] = exposureReadings.reduce(0.0) { $0 + ($1["duration_seconds"] ?? 0) }
+        }
         let json = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         // A manifest is written last, so interrupted exports are identifiable.
         try json.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)

@@ -5,6 +5,10 @@ struct ContentView: View {
     @StateObject private var camera = CameraController()
     @State private var showReport = false
     @AppStorage("recordDiagnostics") private var recordDiagnostics = false
+    @AppStorage("captureMode") private var captureMode = CaptureMode.photo.rawValue
+
+    private var selectedMode: CaptureMode { CaptureMode(rawValue: captureMode) ?? .photo }
+    private var busy: Bool { !camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst }
 
     var body: some View {
         ZStack {
@@ -40,39 +44,38 @@ struct ContentView: View {
                 Text(camera.lastCaptureNote)
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
-                Button {
-                    camera.captureBurst(recordDiagnostics: recordDiagnostics)
-                } label: {
-                    Text(camera.isCapturingBurst ? "Burst em andamento..." : "Foto burst (8 RAW)")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.55), in: Capsule())
+                Picker("Modo", selection: $captureMode) {
+                    ForEach(CaptureMode.allCases, id: \.rawValue) { mode in
+                        Text(mode.title).tag(mode.rawValue)
+                    }
                 }
-                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
-                Button {
-                    camera.probeRawBurst()
-                } label: {
-                    Text(camera.isProbingRaw ? "Sondando RAW..." : "Sonda burst RAW (8 frames)")
-                        .font(.footnote.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(.black.opacity(0.55), in: Capsule())
+                .pickerStyle(.segmented)
+                .padding(.horizontal, 28)
+                .disabled(busy)
+                Group {
+                    switch selectedMode {
+                    case .photo: Text("Para fotografar na mao.")
+                    case .night: Text("Use tripe e uma cena parada. Ate 8 s de luz.")
+                    case .longExposure: Text("Use tripe. O movimento deixa rastros de longa exposicao.")
+                    }
                 }
-                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
+                .font(.caption)
+                .foregroundStyle(.white)
                 Button {
-                    camera.capturePhoto()
+                    camera.captureBurst(mode: selectedMode, recordDiagnostics: recordDiagnostics)
                 } label: {
                     ZStack {
                         Circle().stroke(.white, lineWidth: 4).frame(width: 76, height: 76)
                         Circle().fill(.white).frame(width: 62, height: 62)
                     }
                 }
-                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
+                .disabled(busy)
                 .opacity(camera.isConfigured ? 1 : 0.4)
-                .accessibilityLabel("Capturar foto")
+                .accessibilityLabel("Capturar \(selectedMode.title)")
+                Button("Foto de referencia") { camera.capturePhoto() }
+                    .font(.caption)
+                    .foregroundStyle(.white.opacity(0.8))
+                    .disabled(busy)
             }
             .padding(.vertical, 24)
         }
@@ -81,7 +84,8 @@ struct ContentView: View {
         .sheet(isPresented: $showReport) {
             CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport,
                                  fallback: camera.status, diagnosticNote: camera.diagnosticNote,
-                                 recordDiagnostics: $recordDiagnostics)
+                                 recordDiagnostics: $recordDiagnostics, canProbe: !busy,
+                                 onProbe: { camera.probeRawBurst() })
         }
     }
 }
@@ -93,6 +97,8 @@ struct CapabilityReportView: View {
     let fallback: String
     let diagnosticNote: String
     @Binding var recordDiagnostics: Bool
+    let canProbe: Bool
+    let onProbe: () -> Void
 
     private var reportText: String {
         var parts: [String] = []
@@ -112,8 +118,9 @@ struct CapabilityReportView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     Toggle("Guardar RAWs para comparacao", isOn: $recordDiagnostics)
-                    Text("Opcional: guarda cerca de 220 MB por burst em Arquivos > No Meu iPhone > BurstLab > Ensaios. A foto continua sendo salva na fototeca. Apague os ensaios depois de copiar para o computador.")
+                    Text("Opcional: guarda cerca de 220 MB em Foto ou 420 MB em Noite/Longa em Arquivos > No Meu iPhone > BurstLab > Ensaios. A foto continua sendo salva na fototeca. Apague os ensaios depois de copiar para o computador.")
                         .font(.caption)
+                    Button("Sonda de diagnostico RAW", action: onProbe).disabled(!canProbe)
                     if !diagnosticNote.isEmpty { Text(diagnosticNote).font(.caption) }
                     Text(reportText)
                         .font(.caption.monospaced())

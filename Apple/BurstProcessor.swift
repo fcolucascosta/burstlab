@@ -49,7 +49,8 @@ enum BurstProcessor {
         rotationAngle: Int = 0,
         asShotNeutral: [Double]? = nil,
         colorTransform: [Double]? = nil,
-        noiseProfile: [Double]? = nil
+        noiseProfile: [Double]? = nil,
+        usesRobustMerge: Bool = true
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -73,9 +74,12 @@ enum BurstProcessor {
         let merged = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount)
         merged.initialize(repeating: 0, count: pixelCount)
         do {
-            try BurstFusion.fill(frames: frames, offsets: shifts,
-                                 output: UnsafeMutableBufferPointer(start: merged, count: pixelCount),
-                                 noiseProfile: noiseProfile)
+            let output = UnsafeMutableBufferPointer(start: merged, count: pixelCount)
+            if usesRobustMerge {
+                try BurstFusion.fill(frames: frames, offsets: shifts, output: output, noiseProfile: noiseProfile)
+            } else {
+                try BurstFusion.fillAverage(frames: frames, offsets: shifts, output: output)
+            }
         } catch {
             merged.deinitialize(count: pixelCount)
             merged.deallocate()

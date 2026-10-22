@@ -123,14 +123,52 @@ public enum BurstFusion {
     public static func fill(frames: [BurstRawFrame], offsets: [BurstOffset],
                             output: UnsafeMutableBufferPointer<UInt16>,
                             noiseProfile: [Double]? = nil) throws {
+        let reference = try validate(frames: frames, offsets: offsets, outputCount: output.count)
+        try fillValidated(frames: frames, offsets: offsets, reference: reference, output: output, noiseProfile: noiseProfile)
+    }
+
+    private static func validate(frames: [BurstRawFrame], offsets: [BurstOffset], outputCount: Int) throws -> BurstRawFrame {
         guard let reference = frames.first, frames.count <= 32, offsets.count == frames.count,
               frames.allSatisfy({ $0.width == reference.width && $0.height == reference.height &&
                   BurstRawLayout.isValid(width: $0.width, height: $0.height,
                                          bytesPerRow: $0.bytesPerRow, byteCount: $0.data.count) }),
-              output.count == reference.width * reference.height,
+              outputCount == reference.width * reference.height,
               offsets.first?.dx == 0, offsets.first?.dy == 0,
               offsets.allSatisfy({ $0.dx % 2 == 0 && $0.dy % 2 == 0 && $0.dx >= -64 && $0.dx <= 64 && $0.dy >= -64 && $0.dy <= 64 })
         else { throw Failure.invalidFrames }
+        return reference
+    }
+
+    /// Normalized accumulation for explicit long-exposure effects. All aligned
+    /// frames contribute equally, including moving objects; black pedestal is
+    /// retained once by averaging. UInt32 is safe for <=32 UInt16 samples.
+    public static func fillAverage(frames: [BurstRawFrame], offsets: [BurstOffset],
+                                   output: UnsafeMutableBufferPointer<UInt16>) throws {
+        let reference = try validate(frames: frames, offsets: offsets, outputCount: output.count)
+        let width = reference.width, height = reference.height
+        var sums = [UInt32](repeating: 0, count: width * height)
+        withBuffers(frames) { buffers in
+            for f in frames.indices {
+                let dx = offsets[f].dx, dy = offsets[f].dy
+                for y in 0..<height {
+                    let sy = y + dy
+                    for x in 0..<width {
+                        let sx = x + dx
+                        let valid = sx >= 0 && sx < width && sy >= 0 && sy < height
+                        let frame = valid ? f : 0
+                        let yy = valid ? sy : y, xx = valid ? sx : x
+                        let value = buffers[frame].loadUnaligned(fromByteOffset: yy * frames[frame].bytesPerRow + xx * 2, as: UInt16.self)
+                        sums[y * width + x] += UInt32(value)
+                    }
+                }
+            }
+        }
+        let count = UInt32(frames.count)
+        for i in sums.indices { output[i] = UInt16((sums[i] + count / 2) / count) }
+    }
+
+    private static func fillValidated(frames: [BurstRawFrame], offsets: [BurstOffset], reference: BurstRawFrame,
+                                      output: UnsafeMutableBufferPointer<UInt16>, noiseProfile: [Double]?) throws {
         let width = reference.width, height = reference.height
         let pw = width / 2, ph = height / 2
         let work = try Workspace()

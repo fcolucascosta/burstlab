@@ -40,6 +40,14 @@ public enum CaptureMode: String, CaseIterable, Sendable {
     case photo
     case night
     case longExposure
+
+    public var title: String {
+        switch self {
+        case .photo: return "Foto"
+        case .night: return "Noite"
+        case .longExposure: return "Longa"
+        }
+    }
 }
 
 public struct BurstConfig: Equatable, Sendable {
@@ -60,7 +68,7 @@ public struct BurstConfig: Equatable, Sendable {
         case .photo:
             return BurstConfig(mode: .photo, frameCount: 8, underExposureEV: -0.5)
         case .night:
-            return BurstConfig(mode: .night, frameCount: 16, underExposureEV: -1.0)
+            return BurstConfig(mode: .night, frameCount: 16, underExposureEV: -0.5)
         case .longExposure:
             return BurstConfig(mode: .longExposure, frameCount: 16, underExposureEV: 0)
         }
