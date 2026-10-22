@@ -59,7 +59,14 @@ enum BurstProcessor {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
         let height = reference.height
-        guard width > 1, height > 1 else { throw BurstError.invalidDimensions }
+        guard frames.count <= BurstConfig.frameRange.upperBound,
+              BurstRawLayout.isValid(width: width, height: height,
+                                     bytesPerRow: reference.bytesPerRow, byteCount: reference.data.count),
+              frames.allSatisfy({
+                  $0.width == width && $0.height == height &&
+                  BurstRawLayout.isValid(width: $0.width, height: $0.height,
+                                         bytesPerRow: $0.bytesPerRow, byteCount: $0.data.count)
+              }) else { throw BurstError.invalidDimensions }
 
         let started = CFAbsoluteTimeGetCurrent()
         let pixelCount = width * height
@@ -147,16 +154,16 @@ enum BurstProcessor {
         let exposureScale = Float(min(max(0.18 / medianNorm, 0.5), 24.0))
 
         var ccm: [Double]? = nil
-        if let transform = colorTransform, transform.count == 9 {
+        if let transform = colorTransform, transform.count == 9, transform.allSatisfy({ $0.isFinite }) {
             ccm = transform
         }
         if ccm == nil {
-            if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
+            if let neutral = asShotNeutral, neutral.count == 3, neutral.allSatisfy({ $0.isFinite && $0 > 0 }) {
                 redGain = min(max(Float(neutral[1] / neutral[0]), 0.25), 4.0)
                 blueGain = min(max(Float(neutral[1] / neutral[2]), 0.25), 4.0)
             } else {
-                redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
-                blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
+                redGain = Float((meanGreen - Double(blackLevel)) / max(meanRed - Double(blackLevel), 1))
+                blueGain = Float((meanGreen - Double(blackLevel)) / max(meanBlue - Double(blackLevel), 1))
                 redGain = min(max(redGain, 0.5), 2.5)
                 blueGain = min(max(blueGain, 0.5), 2.5)
             }
@@ -193,16 +200,17 @@ enum BurstProcessor {
 
         for y in 0..<height {
             let y0 = y * width
-            let yUp = max(y - 1, 0) * width
-            let yDown = min(y + 1, height - 1) * width
-            let yUp2 = max(y - 2, 0) * width
-            let yDown2 = min(y + 2, height - 1) * width
+            // Mirror borders instead of clamping: Bayer phase must stay intact.
+            let yUp = (y > 0 ? y - 1 : 1) * width
+            let yDown = (y + 1 < height ? y + 1 : height - 2) * width
+            let yUp2 = (y > 1 ? y - 2 : 2 - y) * width
+            let yDown2 = (y + 2 < height ? y + 2 : 2 * height - 4 - y) * width
             let evenRow = (y & 1) == 0
             for x in 0..<width {
-                let xm2 = x > 1 ? x - 2 : 0
-                let xm1 = x > 0 ? x - 1 : 0
-                let xp1 = x + 1 < width ? x + 1 : width - 1
-                let xp2 = x + 2 < width ? x + 2 : width - 1
+                let xm2 = x > 1 ? x - 2 : 2 - x
+                let xm1 = x > 0 ? x - 1 : 1
+                let xp1 = x + 1 < width ? x + 1 : width - 2
+                let xp2 = x + 2 < width ? x + 2 : 2 * width - 4 - x
                 let center = Int(merged[y0 + x])
                 let north = Int(merged[yUp + x])
                 let south = Int(merged[yDown + x])
@@ -417,9 +425,9 @@ enum BurstProcessor {
               let frameProfiles = profiles(for: frame) else {
             return Shift(dx: 0, dy: 0)
         }
-        let dy = bestShift(referenceProfiles.rows, frameProfiles.rows, maxShift: 64)
-        let dx = bestShift(referenceProfiles.columns, frameProfiles.columns, maxShift: 64)
-        return Shift(dx: (dx / 2) * 2, dy: (dy / 2) * 2)
+        let dy = BurstAlignment.bestShift(referenceProfiles.rows, frameProfiles.rows, maxShift: 64)
+        let dx = BurstAlignment.bestShift(referenceProfiles.columns, frameProfiles.columns, maxShift: 64)
+        return Shift(dx: dx, dy: dy)
     }
 
     private static func profiles(for frame: BurstFrame) -> (rows: [Float], columns: [Float])? {
@@ -453,38 +461,13 @@ enum BurstProcessor {
                     columnCounts[x] += 1
                     y += 8
                 }
-                x += 8
+                x += 1
             }
 
             let rows = (0..<height).map { Float(rowSums[$0]) / Float(max(rowCounts[$0], 1)) }
             let columns = (0..<width).map { Float(columnSums[$0]) / Float(max(columnCounts[$0], 1)) }
             return (rows, columns)
         }
-    }
-
-    private static func bestShift(_ reference: [Float], _ current: [Float], maxShift: Int) -> Int {
-        let count = min(reference.count, current.count)
-        guard count > maxShift * 4 else { return 0 }
-        var best = 0
-        var bestScore = Float.greatestFiniteMagnitude
-        for shift in -maxShift...maxShift {
-            var score: Double = 0
-            var samples = 0
-            var index = max(0, -shift)
-            let end = min(count, count - shift)
-            while index < end {
-                score += abs(Double(reference[index]) - Double(current[index + shift]))
-                samples += 1
-                index += 1
-            }
-            guard samples > count / 2 else { continue }
-            let average = score / Double(samples)
-            if average < Double(bestScore) {
-                bestScore = Float(average)
-                best = shift
-            }
-        }
-        return best
     }
 
     private static func accumulate(

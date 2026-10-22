@@ -1,5 +1,41 @@
 import Foundation
 
+/// The pipeline consumes even-sized, unpacked 16-bit Bayer frames.
+public enum BurstRawLayout {
+    public static func isValid(width: Int, height: Int, bytesPerRow: Int, byteCount: Int) -> Bool {
+        guard width >= 4, height >= 4, width % 2 == 0, height % 2 == 0,
+              width <= Int.max / 2, bytesPerRow >= width * 2,
+              bytesPerRow % 2 == 0, height <= Int.max / bytesPerRow,
+              width <= Int.max / height / 4 else { return false }
+        return byteCount >= bytesPerRow * height
+    }
+}
+
+public enum BurstAlignment {
+    /// Search only even offsets: odd offsets mix Bayer color phases.
+    /// Prefer zero (then the smallest displacement) when evidence is tied.
+    public static func bestShift(_ reference: [Float], _ current: [Float], maxShift: Int) -> Int {
+        let count = min(reference.count, current.count)
+        guard maxShift >= 0, count > 4, reference.allSatisfy({ $0.isFinite }),
+              current.allSatisfy({ $0.isFinite }) else { return 0 }
+        let limit = min(maxShift, (count - 1) / 4) / 2 * 2
+        var best = 0
+        var bestScore = Double.greatestFiniteMagnitude
+        for shift in stride(from: -limit, through: limit, by: 2) {
+            var score = 0.0
+            // Same overlap for every candidate so borders cannot bias the score.
+            for index in limit..<(count - limit) {
+                score += abs(Double(reference[index]) - Double(current[index + shift]))
+            }
+            if score < bestScore || (score == bestScore && abs(shift) < abs(best)) {
+                bestScore = score
+                best = shift
+            }
+        }
+        return best
+    }
+}
+
 public enum CaptureMode: String, CaseIterable, Sendable {
     case photo
     case night
@@ -148,7 +184,9 @@ public enum BurstColorMatrix {
         temperature2: Double = 6504
     ) -> [Double]? {
         guard matrix1.count == 9, matrix2.count == 9,
-              neutral.count == 3, neutral.allSatisfy({ $0 > 0 }),
+              matrix1.allSatisfy({ $0.isFinite }), matrix2.allSatisfy({ $0.isFinite }),
+              neutral.count == 3, neutral.allSatisfy({ $0.isFinite && $0 > 0 }),
+              temperature1.isFinite, temperature2.isFinite,
               temperature1 > 0, temperature2 > 0,
               temperature1 != temperature2 else {
             return nil
@@ -190,7 +228,7 @@ public enum BurstColorMatrix {
             result[row * 3 + 1] /= dot
             result[row * 3 + 2] /= dot
         }
-        return result
+        return result.allSatisfy({ $0.isFinite }) ? result : nil
     }
 
     private static func interpolated(

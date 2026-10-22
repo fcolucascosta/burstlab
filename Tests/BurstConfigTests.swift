@@ -2,6 +2,44 @@ import XCTest
 @testable import BurstCore
 
 final class BurstConfigTests: XCTestCase {
+    func testAlignmentKeepsFlatSceneAtZero() {
+        let flat = [Float](repeating: 2112, count: 256)
+        XCTAssertEqual(BurstAlignment.bestShift(flat, flat, maxShift: 64), 0)
+    }
+
+    func testAlignmentFindsBothDirectionsAndPreservesBayerPhase() {
+        let reference = (0..<256).map { Float(($0 * $0 * 17 + $0 * 31) % 1009) }
+        for offset in [-14, -2, 2, 14] {
+            var shifted = [Float](repeating: 0, count: reference.count)
+            for index in reference.indices where reference.indices.contains(index + offset) {
+                shifted[index + offset] = reference[index]
+            }
+            XCTAssertEqual(BurstAlignment.bestShift(reference, shifted, maxShift: 32), offset)
+        }
+    }
+
+    func testAlignmentRejectsNonFiniteProfiles() {
+        XCTAssertEqual(BurstAlignment.bestShift([Float](repeating: .nan, count: 256),
+                                               [Float](repeating: 1, count: 256), maxShift: 64), 0)
+    }
+
+    func testRawLayoutRejectsTruncationOddStrideAndOverflow() {
+        XCTAssertTrue(BurstRawLayout.isValid(width: 4032, height: 3024, bytesPerRow: 8064, byteCount: 24_385_536))
+        XCTAssertTrue(BurstRawLayout.isValid(width: 4, height: 4, bytesPerRow: 16, byteCount: 64))
+        XCTAssertFalse(BurstRawLayout.isValid(width: 4, height: 4, bytesPerRow: 8, byteCount: 31))
+        XCTAssertFalse(BurstRawLayout.isValid(width: 4, height: 4, bytesPerRow: 9, byteCount: 36))
+        XCTAssertFalse(BurstRawLayout.isValid(width: 3, height: 4, bytesPerRow: 8, byteCount: 32))
+        XCTAssertFalse(BurstRawLayout.isValid(width: Int.max - 1, height: 4, bytesPerRow: 8, byteCount: 32))
+    }
+
+    func testColorTransformRejectsNonFiniteMetadata() {
+        var invalid = colorMatrix1
+        invalid[0] = .nan
+        XCTAssertNil(BurstColorMatrix.cameraToSRGB(matrix1: invalid, matrix2: colorMatrix2, neutral: [1, 1, 1]))
+        XCTAssertNil(BurstColorMatrix.cameraToSRGB(matrix1: colorMatrix1, matrix2: colorMatrix2, neutral: [.infinity, 1, 1]))
+        XCTAssertNil(BurstColorMatrix.cameraToSRGB(matrix1: colorMatrix1, matrix2: colorMatrix2, neutral: [1, 1, 1], temperature1: .infinity))
+    }
+
     func testFrameCountClampsToSupportedRange() {
         XCTAssertEqual(BurstConfig(mode: .photo, frameCount: 0, underExposureEV: 0).frameCount, 1)
         XCTAssertEqual(BurstConfig(mode: .photo, frameCount: 99, underExposureEV: 0).frameCount, 32)
