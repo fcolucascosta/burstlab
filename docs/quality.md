@@ -39,6 +39,18 @@ Cor e denoise permanecem iguais a 0.3.0. Clarear pode tornar ruido mais visivel.
 
 ## Metricas e comparacoes
 
+## Ruido e saturacao: 0.3.2 / 0.3.3
+
+A 0.3.2 desconta a potencia esperada do ruido de dois frames (2 * 256 * variancia para a DFT nao normalizada 16x16) antes de interpretar a distancia espectral como discordancia. Isso reduz falsa rejeicao temporal de regioes paradas, sem novo blur espacial de luma. Depende da calibracao do NoiseProfile/fallback e nao substitui registro local/subpixel.
+
+Um candidato inicial de Wiener espacial foi descartado por perda de textura. No candidato adotado, a comparacao por metades do burst apoiado estima variancia nao repetivel 8-11% menor nos tres recortes RAW, com aproximadamente 1% menos estrutura high-pass repetivel no tecido. Hipoteses: cena estatica/ruido independente; nao e SNR medido do JPEG. Sinteticos com tres niveis de ruido e tres contrastes de objeto movel nao mostraram regressao de movimento.
+
+A 0.3.3 remove o ganho cromatico linear 1,15 e aplica ajuste de cromaticidade em [Oklab, de Ottosson](https://bottosson.github.io/posts/oklab/), depois do filtro cromatico. Ampliacao solicitada ate 1,45, com menos reforco de cores ja fortes, quase neutros e sombras profundas. O gamut limita a ampliacao preservando lightness/hue Oklab; nao ha tratamento semantico de pele nem garantia de preferencia em todas as cenas. Testes verificam neutros, cor padrao, conversoes, matiz/lightness e gamut.
+
+Replays de interior, exterior claro e crepusculo usam os mesmos RAWs para comparar as revisoes. As previas agrupam CFA2x2 e omitem demosaic/filtro cromatico final; nao validam ruido/detalhe do JPEG. A 0.3.3 inclui as mudancas de brilho, ruido e cor; aprovacao final exige foto no SE. Relatorios/metricas/reversao ficam em reports/quality-20261022/fine-tune/.
+
+## Limites das comparacoes
+
 Saturacao HSV media igual a da camera padrao nao demonstra fidelidade ou agradabilidade de cor. Variancia do Laplaciano pode crescer com ruido ou sharpening; sozinha nao demonstra detalhe. Desvio padrao de um recorte pode misturar textura, gradiente de iluminacao e ruido. Comparacoes entre JPEGs com enquadramento/exposicao diferentes sao exploratorias, nao criterios de aprovacao.
 
 Nao tratar um aumento de saturacao como correcao de erros upstream. Avaliar o ajuste de look separadamente da calibracao e nao aumentar o denoise para esconder erros de fusao. Nao dobrar frames automaticamente antes de medir alinhamento e memoria.
