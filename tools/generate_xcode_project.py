@@ -110,7 +110,7 @@ def generate():
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "0.4.0",
+        "CFBundleShortVersionString": "0.4.1",
         "CFBundleVersion": "1",
         "NSCameraUsageDescription": "BurstLab usa a camera para capturar e processar fotos computacionais.",
         "NSPhotoLibraryAddUsageDescription": "BurstLab salva as fotos capturadas na sua fototeca.",

@@ -35,8 +35,9 @@ public struct BurstToneMap {
         }
         let amount = min(1, 5.5 * log(2) / max(percentile(0.99) - percentile(0.01), 1e-5))
         compression = amount
-        // At most one stop of lift; bright regions are not darkened by the map.
-        logGains = base.map { min(max((amount - 1) * ($0 - log(0.18)), 0), log(2)) }
+        // Compress illumination on both sides of middle gray. Retain the
+        // existing one-stop shadow limit; allow up to four stops for highlights.
+        logGains = base.map { min(max((amount - 1) * ($0 - log(0.18)), -log(16)), log(2)) }
     }
 
     /// Coordinates are in thumbnail space; callers map sensor block centers here.
@@ -56,8 +57,11 @@ public struct BurstToneMap {
         guard red.isFinite, green.isFinite, blue.isFinite, gain.isFinite else { return (0, 0, 0) }
         let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
         guard luminance > 1e-5 else { return (0, 0, 0) }
-        let lifted = luminance * min(max(gain, 1), 2)
-        let output = lifted <= 0.65 ? lifted : 0.65 + 0.35 * (1 - exp(-(lifted - 0.65) / 0.35))
+        let lifted = luminance * min(max(gain, 1.0 / 16), 2)
+        // A rational shoulder retains highlight steps much longer than the
+        // previous exponential shoulder when encoding to an 8-bit JPEG.
+        let excess = max(lifted - 0.65, 0)
+        let output = lifted <= 0.65 ? lifted : 0.65 + 0.35 * excess / (excess + 0.35)
         let scale = output / luminance
         // Gamut compression here; perceptual chroma follows denoising later.
         let dr = red * scale - output

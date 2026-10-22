@@ -53,4 +53,19 @@ final class BurstToneMapTests: XCTestCase {
         let out = BurstToneMap.render(red: 0.01, green: 0.01, blue: 0.01, gain: 100)
         XCTAssertEqual(out.0, 0.02, accuracy: 1e-12)
     }
+
+    func testHighlightCompressionRetainsEightBitStepsAndShadowLift() throws {
+        let map = try BurstToneMap(luminances: (0..<400).map { exp(-8 + Double($0) / 399 * 12) }, width: 40, height: 10)
+        XCTAssertGreaterThan(map.gain(x: 0, y: 0), 1)
+        XCTAssertLessThan(map.gain(x: 39, y: 9), 1)
+        func code(_ value: Double) -> Int {
+            let y = BurstToneMap.render(red: value, green: value, blue: value, gain: 1).0
+            return Int((255 * (1.055 * pow(y, 1 / 2.4) - 0.055)).rounded())
+        }
+        XCTAssertLessThan(code(2), code(4))
+        XCTAssertLessThan(code(4), code(8))
+        XCTAssertLessThan(code(8), 255)
+        let dimmed = BurstToneMap.render(red: 0.18, green: 0.18, blue: 0.18, gain: 0.5)
+        XCTAssertEqual(dimmed.0, 0.09, accuracy: 1e-12)
+    }
 }
