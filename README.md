@@ -8,6 +8,8 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 ## Documentacao
 
+- [Auditoria HDR+, Indigo e GCam mods](docs/pipeline-audit.md): inspecao estatica, referencias executaveis e lacunas do pipeline.
+
 - [Qualidade e ensaios reproduziveis](docs/quality.md): prioridade fotografica, limites conhecidos e comparacoes com a camera padrao.
 
 - [Pipeline e pesquisa](docs/pipeline.md): o que o Indigo faz, o que vamos implementar, algoritmos e limites do SE.
