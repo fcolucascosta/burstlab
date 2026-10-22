@@ -25,10 +25,10 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 
 ## F2 - Nucleo de burst (v1 implementada; validacao no aparelho pendente)
 
-- [x] Captura de 8 frames RAW com exposicao constante (AE travado, -1,5 EV) e foco travado.
-- [x] Alinhamento por projecoes (transacao inteira, arredondada para par) e merge por media.
-- [x] Demosaic Malvar-He-Cutler, WB gray-world, tone mapping global e JPEG na fototeca.
-- Budget medido: 24,4 MB/frame; 8 frames = 195 MB; acumulador UInt32 = 48,8 MB; pico alvo < 150 MB.
+- [x] Captura de 8 frames RAW com exposicao constante (exposicao customizada, -0,5 EV) e foco travado.
+- [x] Alinhamento por projecoes (translacao inteira, arredondada para par) e merge por media.
+- [x] Demosaic Malvar-He-Cutler, transformacao de cor DNG com WB alternativo, normalizacao global de exposicao, denoise espacial e JPEG na fototeca.
+- Memoria calculada: 24,4 MB/frame; os 8 RAW retidos ja ocupam 195 MB. Acumulador UInt32 = 48,8 MB, contagens = 12,2 MB, Bayer merged = 24,4 MB, RGB = 36,6 MB; denoise e rotacao adicionam buffers. O desenho atual excede o antigo alvo de 150 MB. Pico residente ainda nao medido; processamento incremental/por tiles continua pendente.
 - [ ] Validacao no aparelho: SNR em sombras vs frame unico, ghosting, cores, latencia e pico de memoria.
 - [ ] Merge robusto (rejeicao de outliers/ghosting) e alinhamento subpixel/piramide.
 
@@ -53,3 +53,11 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 - Saida DNG propria.
 - Gain map SDR/HDR (ISO 21496-1).
 - Denoise por CoreML.
+
+## Revisao 0.2.7
+
+- Correcao do perfil horizontal esparso; busca somente deslocamentos pares, com empate favorecendo zero.
+- Validacao dos layouts RAW e metadados nao finitos; bordas espelhadas preservam a fase CFA.
+- Um burst por vez ate terminar processamento e salvamento; callbacks associados por ID e limites de espera.
+- Calibracao fixa 2112/16383 restrita ao RAW RGGB de 14 bits; nao e calibracao dinamica por frame.
+- Testes sinteticos e build nao comprovam SNR, fidelidade de cor, ausencia de ghosting ou desempenho no aparelho.

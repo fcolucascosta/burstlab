@@ -4,7 +4,7 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual:** F1 concluida. A sonda no aparelho confirmou RAW Bayer (`rgg4`, 14-bit RGGB), exposicao ate 0,5 s por frame, ISO 22-2112 e 3,79 GB de memoria. Proximo passo: sonda de burst RAW (taxa, nivel de preto/saturacao, termica) antes do merge.
+**Estado atual:** pipeline experimental de 8 RAW: alinhamento por translacao inteira par, merge por media, demosaic, cor derivada dos metadados DNG com WB alternativo e denoise espacial. F1/F1.5 possuem medicoes historicas documentadas; qualidade, ghosting, latencia e pico de memoria da revisao atual ainda precisam de validacao no SE. Night, Long Exposure e merge robusto ainda nao estao implementados.
 
 ## Documentacao
 
