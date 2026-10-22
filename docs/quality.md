@@ -2,16 +2,20 @@
 
 Escopo confirmado em 2026-10-22: cenas paradas, camera na mao de dia e tripe a noite. A meta e superar a camera padrao em comparacoes reais no SE 2022; isso ainda nao foi demonstrado.
 
-## Diagnostico atual
+## Diagnostico da 0.2.7
 
 - O alinhamento original tinha um perfil horizontal com 7/8 das colunas zeradas. A revisao corrige esse defeito e preserva a fase Bayer, mas continua sendo translacao global inteira. Nao corrige rotacao, paralaxe nem deslocamento fracionario.
 - O merge e media aritmetica: qualquer residual de alinhamento entra na imagem. Ainda nao existe rejeicao robusta de movimento. Mais frames sem resolver isso podem aumentar o borrao.
-- O denoise atual aplica media cromatica numa janela de 7x7 usando apenas diferenca de luma como guia. Duas cores diferentes com luma semelhante podem ser misturadas; a luma tambem recebe blend fixo de 25-50%. A intensidade nao depende de um modelo medido de ruido nem da contribuicao temporal efetiva.
+- O denoise da 0.2.7 aplica media cromatica numa janela de 7x7 usando apenas diferenca de luma como guia. Duas cores diferentes com luma semelhante podem ser misturadas; a luma tambem recebe blend fixo de 25-50%. A intensidade nao depende de um modelo medido de ruido nem da contribuicao temporal efetiva.
 - O brilho e normalizado pela mediana verde do RAW para 0,18. Isso pode levantar cenas predominantemente escuras e amplificar ruido. O caminho de cor faz clipping por canal antes da transferencia sRGB; nao ha compressao suave de realces nem tratamento de gamut.
 - A transformacao DNG atual e uma aproximacao. Neutral->branco e um teste necessario, mas nao valida todos os matizes. CameraCalibration, AnalogBalance e ForwardMatrix nao sao usados. Verificar os tags reais antes de ampliar o modelo.
 - Subexposicao fixa de -0,5 EV nao considera movimento, luminosidade ou risco real de clipping. A exposicao parte do AE de preview, sem estimar tremor nem selecionar o frame de referencia mais nitido.
 
 Nenhuma dessas observacoes de codigo mede quanto cada fator contribui na foto do usuario.
+
+## Primeiro experimento: 0.2.8
+
+A revisao 0.2.8 remove somente a media espacial de luminancia e conserva o filtro cromatico. A decisao veio do reprocessamento offline de um burst real apoiado: o filtro anterior reduzia a estrutura de luminancia repetivel junto com o ruido. O candidato preserva mais dessa estrutura com mais grao visivel. Isso ainda nao e validacao fisica da 0.2.8 nem comparacao com a camera padrao. RAWs, replay, limites das metricas e reversao permanecem nos relatorios locais; nao sao publicados no repositorio.
 
 ## Corrigir a metodologia anterior
 
