@@ -4,9 +4,11 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual (0.3.3):** pipeline experimental de 8 RAW: alinhamento por translacao inteira par, fusao por frequencia ancorada no primeiro frame com distancia corrigida pelo ruido esperado, demosaic, cor derivada do DNG, exposicao por luminancia logaritmica, tom local limitado, denoise cromatico e ajuste perceptual de cor com limite de gamut. Na 0.3.0 o usuario relatou grande melhora e ausencia de arrasto na captura externa; brilho, cor e ruido motivaram as revisoes seguintes. A 0.3.3 passou testes e replay em tres bursts; aceite fisico pendente. Alinhamento local/subpixel, Night, Long Exposure e saida HDR com gain map continuam pendentes.
+**Estado atual (0.4.0):** Foto usa 8 RAWs; Noite e Longa sao modos explicitos de tripe com 16 RAWs e obturador de ate 0,5 s/frame, priorizando ISO baixo. Noite usa fusao robusta; Longa inclui movimento na acumulacao alinhada normalizada. O obturador principal respeita o modo selecionado. O ensaio noturno da 0.3.3 revelou que somente Foto estava ligado, com ISO 640 e 1/43 s no DNG; o acabamento sozinho nao entregava captura noturna. A 0.4.0 ainda requer validacao fisica de ruido/detalhe, tempo, termica e memoria. Alinhamento local/subpixel, Noite na mao, deteccao automatica de tripe e gain map HDR permanecem pendentes.
 
 ## Documentacao
+
+- [Noite e longa exposicao em tripe](docs/night.md): politica de captura, uso dos modos e evidencia pendente.
 
 - [Auditoria HDR+, Indigo e GCam mods](docs/pipeline-audit.md): inspecao estatica, referencias executaveis e lacunas do pipeline.
 
