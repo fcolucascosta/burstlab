@@ -8,7 +8,11 @@ final class BurstConfigTests: XCTestCase {
     }
 
     func testAlignmentFindsBothDirectionsAndPreservesBayerPhase() {
-        let reference = (0..<256).map { Float(($0 * $0 * 17 + $0 * 31) % 1009) }
+        let reference: [Float] = (0..<256).map { (index: Int) -> Float in
+            let quadratic = index * index * 17
+            let linear = index * 31
+            return Float((quadratic + linear) % 1009)
+        }
         for offset in [-14, -2, 2, 14] {
             var shifted = [Float](repeating: 0, count: reference.count)
             for index in reference.indices where reference.indices.contains(index + offset) {
