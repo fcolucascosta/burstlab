@@ -26,15 +26,16 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 ## F2 - Nucleo de burst (v1 implementada; validacao no aparelho pendente)
 
 - [x] Captura de 8 frames RAW com exposicao constante (exposicao customizada, -0,5 EV) e foco travado.
-- [x] Alinhamento por projecoes (translacao inteira, arredondada para par) e merge por media.
+- [x] Alinhamento por projecoes (translacao inteira, arredondada para par); media inicial substituida por fusao por frequencia na 0.2.9.
 - [x] Demosaic Malvar-He-Cutler, transformacao de cor DNG com WB alternativo, normalizacao global de exposicao, denoise espacial e JPEG na fototeca.
-- Memoria calculada: 24,4 MB/frame; os 8 RAW retidos ja ocupam 195 MB. Acumulador UInt32 = 48,8 MB, contagens = 12,2 MB, Bayer merged = 24,4 MB, RGB = 36,6 MB; denoise e rotacao adicionam buffers. O desenho atual excede o antigo alvo de 150 MB. Pico residente ainda nao medido; processamento incremental/por tiles continua pendente.
+- Memoria calculada: 24,4 MB/frame; os 8 RAW retidos ja ocupam 195 MB. Bayer merged = 24,4 MB, RGB = 36,6 MB; denoise e rotacao adicionam buffers. A 0.2.9 reutiliza os buffers FFT e acumula uma fase CFA por vez; remove os acumuladores/contagens inteiros anteriores, mas mantem os 8 RAW. Pico residente ainda nao medido e o antigo alvo de 150 MB continua excedido so pelos frames retidos.
 - [ ] Validacao no aparelho: SNR em sombras vs frame unico, ghosting, cores, latencia e pico de memoria.
-- [ ] Merge robusto (rejeicao de outliers/ghosting) e alinhamento subpixel/piramide.
+- [x] Merge por frequencia com referencia privilegiada e limiar guiado por ruido (0.2.9); teste numerico e replay real, aceite fisico pendente.
+- [ ] Alinhamento local/subpixel/piramide, selecao da ancora e medida das contribuicoes efetivas.
 
 ## F3 - Look natural
 
-- Tone mapping global + realce local controlado; saturacao leve; sharpening leve.
+- Mapa local limitado a 1 EV, shoulder e compressao de gamut implementados na 0.3.0; ajuste cromatico experimental 1,15. Aceite fisico pendente; sharpening nao implementado.
 - Comparacao com amostras de referencia.
 
 ## F4 - Modos

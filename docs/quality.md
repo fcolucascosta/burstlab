@@ -17,11 +17,19 @@ Nenhuma dessas observacoes de codigo mede quanto cada fator contribui na foto do
 
 A revisao 0.2.8 remove somente a media espacial de luminancia e conserva o filtro cromatico. A decisao veio do reprocessamento offline de um burst real apoiado: o filtro anterior reduzia a estrutura de luminancia repetivel junto com o ruido. O candidato preserva mais dessa estrutura com mais grao visivel. Isso ainda nao e validacao fisica da 0.2.8 nem comparacao com a camera padrao. RAWs, replay, limites das metricas e reversao permanecem nos relatorios locais; nao sao publicados no repositorio.
 
+## Experimentos 0.2.9 e 0.3.0
+
+Na 0.2.9 a media incondicional foi substituida por fusao por frequencia em blocos sobrepostos de cada fase Bayer. A discordancia com o primeiro frame reduz a contribuicao dos demais; o limiar usa NoiseProfile do DNG, quando acessivel, ou estimativa robusta da diferenca entre frames. O alinhamento continua global inteiro: essa rejeicao nao recupera detalhe perdido por tremor durante a exposicao, nem substitui alinhamento local/subpixel.
+
+Na 0.3.0 o acabamento trabalha antes do clipping/gamma: um mapa guiado de luminancia logaritmica limita o levantamento local a um ponto, uma curva suave comprime realces e a compressao de gamut preserva luminancia/direcao cromatica. O fator cromatico 1,15 e uma escolha experimental de look, nao calibracao de fidelidade. A exposicao pela mediana verde e a matriz DNG simplificada ainda precisam de avaliacao. A saida continua JPEG SDR; nao ha gain map HDR.
+
+Um burst real externo (ISO 32, aproximadamente 1/725 s) foi reprocessado offline com a mesma entrada para media, fusao e acabamento. A inspecao visual mostra reducao dos rastros dos carros e sombras mais legiveis; as previas usam agrupamento CFA 2x2, sem o demosaic e filtro cromatico finais. Isso nao mede qualidade da nova captura instalada, nem demonstra superioridade sobre a camera padrao. Testes Swift verificam FFT contra operador externo, integridade Bayer, ruido sintetico, mapa de tom contra NumPy/SciPy e propriedades de gamut/neutralidade.
+
 ## Corrigir a metodologia anterior
 
 Saturacao HSV media igual a da camera padrao nao demonstra fidelidade ou agradabilidade de cor. Variancia do Laplaciano pode crescer com ruido ou sharpening; sozinha nao demonstra detalhe. Desvio padrao de um recorte pode misturar textura, gradiente de iluminacao e ruido. Comparacoes entre JPEGs com enquadramento/exposicao diferentes sao exploratorias, nao criterios de aprovacao.
 
-Nao aplicar outro multiplicador de saturacao nem aumentar o denoise para esconder erros upstream. Nao dobrar frames automaticamente antes de medir alinhamento e memoria.
+Nao tratar um aumento de saturacao como correcao de erros upstream. Avaliar o ajuste de look separadamente da calibracao e nao aumentar o denoise para esconder erros de fusao. Nao dobrar frames automaticamente antes de medir alinhamento e memoria.
 
 ## Coleta reproduzivel
 

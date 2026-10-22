@@ -79,6 +79,14 @@ Nao promover a 0.2.8 como solucao de ghosting ou cor: ela so removeu a suavizaca
 
 Tratar cor em um experimento separado: validar a transformacao do DNG com conversor de referencia, depois avaliar curva de contraste, gamut e cromaticidade em cenas pareadas com a camera padrao. O objetivo estetico continua sendo o usuario preferir o resultado; metricas de fidelidade so podem ser usadas quando ha referencia conhecida.
 
-## Readback e reversao
+## Atualizacao de implementacao: 0.2.9 / 0.3.0
+
+O comparativo acima registra o baseline 0.2.8. A 0.2.9 implementa fusao por frequencia independente, com FFT Accelerate 16x16 em cada fase CFA, sobreposicao de metade do bloco e janela cosseno. Um fixture do operador IPOL foi usado como oraculo numerico; o codigo AGPL nao foi incorporado ao app. O NoiseProfile de dois coeficientes orienta a variancia por sinal; se ausente no callback, usa-se estimativa MAD de diferencas alinhadas. Movimento dominante pode contaminar essa estimativa. Nao ha selecao da melhor ancora, alinhamento local/subpixel nem medida do numero efetivo de amostras.
+
+A 0.3.0 adiciona mapa de sombras em thumbnail de luminancia linear, com filtro guiado em log ([He et al., ECCV 2010](https://kaiminghe.github.io/publications/eccv10guidedfilter.pdf)), ganho limitado a 1 EV, shoulder suave e compressao de gamut antes da transferencia sRGB. Nao reproduz o acabamento proprietario da GCam nem gera JPEG HDR com gain map. O ajuste cromatico 1,15 e experimental.
+
+O replay do burst externo novo mostra visualmente menos copias de carros na mesma entrada. Seus RAWs tem ISO 32, tempo aproximadamente 1/725 s e fracao saturada de 0,0000328%. Isso sustenta a investigacao de merge/acabamento em vez de atribuir todos os rastros a exposicao longa. As previas agrupam CFA 2x2 e nao incluem o demosaic/filtro final. Desempenho no A15, ruido noturno e melhora fisica continuam pendentes.
+
+## Readback e reversao do estudo original
 
 Esta rodada nao altera o algoritmo do app nem gera nova versao. Os originais JPEG/RAW continuam preservados. O estudo e uma alteracao documental isolada; reversao por git revert do commit correspondente. As referencias em build/research/ e os relatorios em reports/ nao participam do IPA.
