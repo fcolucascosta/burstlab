@@ -50,7 +50,8 @@ enum BurstProcessor {
         asShotNeutral: [Double]? = nil,
         colorTransform: [Double]? = nil,
         noiseProfile: [Double]? = nil,
-        usesRobustMerge: Bool = true
+        usesRobustMerge: Bool = true,
+        highlightFrames: [Int] = [], exposureProducts: [Double]? = nil
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -66,28 +67,54 @@ enum BurstProcessor {
 
         let started = CFAbsoluteTimeGetCurrent()
         let pixelCount = width * height
-
+        let hdrRatio: Double?
+        if !highlightFrames.isEmpty {
+            guard usesRobustMerge, let products = exposureProducts, products.count == frames.count else {
+                throw BurstHDR.Failure.invalidBracket
+            }
+            hdrRatio = try BurstHDR.ratio(products: products, shortIndices: highlightFrames)
+        } else { hdrRatio = nil }
+        let referenceProfiles = profiles(for: reference, signalScale: hdrRatio == nil ? nil : 1)
         let shifts = frames.enumerated().map { index, frame in
-            index == 0 ? Shift(dx: 0, dy: 0) : estimateShift(reference: reference, frame: frame)
+            guard index > 0, let referenceProfiles else { return Shift(dx: 0, dy: 0) }
+            let scale = hdrRatio != nil ? (exposureProducts![0] / exposureProducts![index]) : nil
+            guard let current = profiles(for: frame, signalScale: scale) else { return Shift(dx: 0, dy: 0) }
+            return Shift(dx: BurstAlignment.bestShift(referenceProfiles.columns, current.columns, maxShift: 64),
+                         dy: BurstAlignment.bestShift(referenceProfiles.rows, current.rows, maxShift: 64))
         }
         let alignedAt = CFAbsoluteTimeGetCurrent()
-        let merged = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount)
+        // Keep recovered highlight radiance above sensor white until tone mapping.
+        let merged = UnsafeMutablePointer<UInt32>.allocate(capacity: pixelCount)
         merged.initialize(repeating: 0, count: pixelCount)
-        do {
-            let output = UnsafeMutableBufferPointer(start: merged, count: pixelCount)
-            if usesRobustMerge {
-                try BurstFusion.fill(frames: frames, offsets: shifts, output: output, noiseProfile: noiseProfile)
-            } else {
-                try BurstFusion.fillAverage(frames: frames, offsets: shifts, output: output)
-            }
-        } catch {
-            merged.deinitialize(count: pixelCount)
-            merged.deallocate()
-            throw error
-        }
         defer {
             merged.deinitialize(count: pixelCount)
             merged.deallocate()
+        }
+        func fuse(_ group: [BurstFrame], offsets: [Shift]) throws -> [UInt16] {
+            var raw = [UInt16](repeating: 0, count: pixelCount)
+            try raw.withUnsafeMutableBufferPointer {
+                if usesRobustMerge { try BurstFusion.fill(frames: group, offsets: offsets, output: $0, noiseProfile: noiseProfile) }
+                else { try BurstFusion.fillAverage(frames: group, offsets: offsets, output: $0) }
+            }
+            return raw
+        }
+        var hdrStats = BurstHDR.Statistics()
+        if let ratio = hdrRatio {
+            let shortSet = Set(highlightFrames)
+            let longIndices = frames.indices.filter { !shortSet.contains($0) }
+            let long = try fuse(longIndices.map { frames[$0] }, offsets: longIndices.map { shifts[$0] })
+            let base = shifts[highlightFrames[0]]
+            let shortOffsets = highlightFrames.map { Shift(dx: shifts[$0].dx - base.dx, dy: shifts[$0].dy - base.dy) }
+            let short = try fuse(highlightFrames.map { frames[$0] }, offsets: shortOffsets)
+            hdrStats = try long.withUnsafeBufferPointer { l in
+                try short.withUnsafeBufferPointer { s in
+                    try BurstHDR.fill(long: l, short: s, width: width, height: height, shortOffset: base, ratio: ratio,
+                                      noiseProfile: noiseProfile, output: UnsafeMutableBufferPointer(start: merged, count: pixelCount))
+                }
+            }
+        } else {
+            let raw = try fuse(frames, offsets: shifts)
+            for i in 0..<pixelCount { merged[i] = UInt32(raw[i]) }
         }
         let fusedAt = CFAbsoluteTimeGetCurrent()
 
@@ -348,7 +375,11 @@ enum BurstProcessor {
                            "rotation_jpeg": finishedAt - coloredAt],
             exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
                             "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
-                            "adjustment_over_luminance_median_ev": meter.adjustmentEV]
+                            "adjustment_over_luminance_median_ev": meter.adjustmentEV,
+                            "hdr_exposure_ratio": hdrRatio ?? 1,
+                            "hdr_blended_cells": Double(hdrStats.blendedCells),
+                            "hdr_motion_rejected_cells": Double(hdrStats.motionRejectedCells),
+                            "hdr_short_clipped_cells": Double(hdrStats.shortClippedCells)]
         )
     }
 
@@ -434,23 +465,17 @@ enum BurstProcessor {
         return UInt8((encoded * 255.0).rounded())
     }
 
-    private static func estimateShift(reference: BurstFrame, frame: BurstFrame) -> Shift {
-        guard let referenceProfiles = profiles(for: reference),
-              let frameProfiles = profiles(for: frame) else {
-            return Shift(dx: 0, dy: 0)
-        }
-        let dy = BurstAlignment.bestShift(referenceProfiles.rows, frameProfiles.rows, maxShift: 64)
-        let dx = BurstAlignment.bestShift(referenceProfiles.columns, frameProfiles.columns, maxShift: 64)
-        return Shift(dx: dx, dy: dy)
-    }
-
-    private static func profiles(for frame: BurstFrame) -> (rows: [Float], columns: [Float])? {
+    private static func profiles(for frame: BurstFrame, signalScale: Double? = nil) -> (rows: [Float], columns: [Float])? {
         let width = frame.width
         let height = frame.height
         let rowBytes = frame.bytesPerRow
         guard rowBytes >= width * 2 else { return nil }
         return frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> (rows: [Float], columns: [Float])? in
             guard let base = raw.baseAddress else { return nil }
+            func value(_ sample: UInt16) -> UInt64 {
+                guard let signalScale else { return UInt64(sample) }
+                return UInt64(min(max((Double(sample) - 2112) * signalScale, 0), 0.8 * 14271).rounded())
+            }
 
             var rowSums = [UInt64](repeating: 0, count: height)
             var rowCounts = [UInt32](repeating: 0, count: height)
@@ -458,7 +483,7 @@ enum BurstProcessor {
                 let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
                 var x = 0
                 while x < width {
-                    rowSums[y] += UInt64(row[x])
+                    rowSums[y] += value(row[x])
                     rowCounts[y] += 1
                     x += 8
                 }
@@ -471,7 +496,7 @@ enum BurstProcessor {
                 var y = 0
                 while y < height {
                     let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
-                    columnSums[x] += UInt64(row[x])
+                    columnSums[x] += value(row[x])
                     columnCounts[x] += 1
                     y += 8
                 }

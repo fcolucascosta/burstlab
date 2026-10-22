@@ -107,7 +107,9 @@ def package(app, output=None):
             "Frequency-based motion rejection is experimental; local/subpixel alignment, HDR gain maps, "
             "automatic tripod detection and handheld night are not implemented. Explicit Night trades shutter "
             "duration (up to 0.5 s/frame) for lower ISO with robust fusion; Long uses equal-weight accumulation "
-            "for motion trails. Image quality, peak "
+            "for motion trails. Night detects bright RAW highlights and can interleave 12 long/4 short frames, "
+            "normalizing measured exposures into wide RAW radiance before local highlight compression. "
+            "Bracket motion recovery is experimental. Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),
     }

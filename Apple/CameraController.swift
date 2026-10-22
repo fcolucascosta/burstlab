@@ -73,6 +73,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstConfig = BurstConfig.defaults(for: .photo)
     private var burstPlan: BurstCapturePlan?
     private var burstExposureReadings: [[String: Double]] = []
+    private var burstCurrentShort = false
     private var burstRetries = 0
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
@@ -402,6 +403,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             let generation = self.burstGeneration
             self.burstPlan = nil
             self.burstExposureReadings.removeAll()
+            self.burstCurrentShort = false
             self.burstFormat = rawFormat
             self.burstFrames.removeAll()
             self.burstRemaining = self.burstConfig.frameCount
@@ -532,6 +534,28 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             }
         }
         burstReadinessPolls = 0
+        if let plan = burstPlan, let device = photoDevice {
+            let index = burstFrames.count
+            let wantsShort = plan.shortIndices.contains(index)
+            if wantsShort != burstCurrentShort {
+                let generation = burstGeneration
+                do {
+                    try device.lockForConfiguration()
+                    let requested = CMTime(seconds: plan.duration(for: index), preferredTimescale: 1_000_000_000)
+                    let duration = CMTimeMaximum(CMTimeMinimum(requested, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
+                    let iso = min(max(Float(plan.iso), device.activeFormat.minISO), device.activeFormat.maxISO)
+                    device.setExposureModeCustom(duration: duration, iso: iso) { _ in
+                        self.sessionQueue.asyncAfter(deadline: .now() + 0.05) {
+                            guard self.burstActive, self.burstGeneration == generation else { return }
+                            self.burstCurrentShort = wantsShort
+                            self.captureBurstFrame()
+                        }
+                    }
+                    device.unlockForConfiguration()
+                } catch { abortBurst("Falha ao mudar a exposicao HDR: \(error.localizedDescription)") }
+                return
+            }
+        }
         let frameNumber = burstConfig.frameCount - burstRemaining + 1
         let modeTitle = burstConfig.mode.title
         let total = burstConfig.frameCount
@@ -583,9 +607,15 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             abortBurst("Burst: falha ao copiar frame RAW.")
             return
         }
+        if burstFrames.isEmpty, burstConfig.mode == .night,
+           BurstHDR.highlightFraction(frame) >= 0.0005 {
+            burstPlan?.bracketsHighlights = true
+            burstLog.notice("HDR highlight bracket enabled from first RAW")
+        }
         burstFrames.append(frame)
         let exif = photo.metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
         var reading: [String: Double] = ["frame_index": Double(burstExposureReadings.count)]
+        reading["highlight_frame"] = burstCurrentShort ? 1 : 0
         if let seconds = exif[kCGImagePropertyExifExposureTime as String] as? NSNumber,
            seconds.doubleValue.isFinite, seconds.doubleValue > 0 { reading["duration_seconds"] = seconds.doubleValue }
         if let values = exif[kCGImagePropertyExifISOSpeedRatings as String] as? [NSNumber], let iso = values.first,
@@ -670,6 +700,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let plan = burstPlan
         let exposureReadings = burstExposureReadings
+        let highlightFrames = plan?.shortIndices ?? []
+        let exposureProducts: [Double]? = exposureReadings.allSatisfy({ $0["duration_seconds"] != nil && $0["iso"] != nil })
+            ? exposureReadings.map { ($0["duration_seconds"] ?? 0) * ($0["iso"] ?? 0) } : nil
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
         let noiseProfile = burstNoiseProfile
@@ -729,7 +762,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     asShotNeutral: asShotNeutral,
                     colorTransform: colorTransform,
                     noiseProfile: noiseProfile,
-                    usesRobustMerge: config.usesRobustMerge
+                    usesRobustMerge: config.usesRobustMerge,
+                    highlightFrames: highlightFrames, exposureProducts: exposureProducts
                 )
                 if let directory = diagnosticDirectory {
                     do {

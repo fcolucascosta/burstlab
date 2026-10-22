@@ -55,7 +55,7 @@ struct ContentView: View {
                 Group {
                     switch selectedMode {
                     case .photo: Text("Para fotografar na mao.")
-                    case .night: Text("Use tripe e uma cena parada. Ate 8 s de luz.")
+                    case .night: Text("Use tripe. HDR automatico para preservar luzes e sombras.")
                     case .longExposure: Text("Use tripe. O movimento deixa rastros de longa exposicao.")
                     }
                 }

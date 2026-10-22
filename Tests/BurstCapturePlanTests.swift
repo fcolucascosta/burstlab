@@ -60,4 +60,17 @@ final class BurstCapturePlanTests: XCTestCase {
         XCTAssertNil(BurstCapturePlan.make(mode: .night, previewDuration: 1e308, previewISO: 1e308,
                      minDuration: 0.001, maxDuration: 0.5, minISO: 22, maxISO: 2112))
     }
+
+    func testNightBracketReservesFourShortFramesWithoutChangingOtherModes() throws {
+        var night = try plan(.night)
+        XCTAssertEqual(night.integrationSeconds, 8)
+        night.bracketsHighlights = true
+        XCTAssertEqual(night.shortIndices, [3, 7, 11, 15])
+        XCTAssertEqual(night.duration(for: 3), 0.03125)
+        XCTAssertEqual(night.integrationSeconds, 6.125)
+        XCTAssertFalse(night.shortIndices.contains(0))
+        var long = try plan(.longExposure); long.bracketsHighlights = true
+        XCTAssertEqual(long.shortIndices, [])
+        XCTAssertEqual(long.integrationSeconds, 8)
+    }
 }

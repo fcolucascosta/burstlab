@@ -6,8 +6,19 @@ public struct BurstCapturePlan {
     public let config: BurstConfig
     public let duration: Double
     public let iso: Double
-    public var integrationSeconds: Double { duration * Double(config.frameCount) }
-    public var timeoutSeconds: Double { max(15, Double(config.frameCount) * (duration + 2) + 5) }
+    public let minDuration: Double
+    public var bracketsHighlights = false
+    public var shortIndices: [Int] {
+        guard bracketsHighlights, config.mode == .night, duration / minDuration >= 2 else { return [] }
+        return (0..<config.frameCount).filter { $0 % 4 == 3 }
+    }
+    public func duration(for index: Int) -> Double {
+        shortIndices.contains(index) ? max(duration / 16, minDuration) : duration
+    }
+    public var integrationSeconds: Double { (0..<config.frameCount).reduce(0) { $0 + duration(for: $1) } }
+    public var timeoutSeconds: Double {
+        max(15, Double(config.frameCount) * (duration + 2 + (config.mode == .night ? 1 : 0)) + 5)
+    }
 
     public static func make(mode: CaptureMode, previewDuration: Double, previewISO: Double,
                             minDuration: Double, maxDuration: Double, minISO: Double, maxISO: Double) -> Self? {
@@ -29,6 +40,6 @@ public struct BurstCapturePlan {
             duration = min(max(product / minISO, minDuration), longest)
             iso = min(max(product / duration, minISO), maxISO)
         }
-        return Self(config: config, duration: duration, iso: iso)
+        return Self(config: config, duration: duration, iso: iso, minDuration: minDuration)
     }
 }

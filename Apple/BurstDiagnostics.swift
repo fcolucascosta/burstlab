@@ -56,6 +56,8 @@ enum BurstDiagnostics {
             manifest["capture_plan"] = ["duration_seconds": plan.duration, "iso": plan.iso,
                                         "integration_seconds": plan.integrationSeconds,
                                         "timeout_seconds": plan.timeoutSeconds]
+            manifest["highlight_frame_indices"] = plan.shortIndices
+            manifest["planned_frame_durations"] = (0..<config.frameCount).map { plan.duration(for: $0) }
         }
         if exposureReadings.count == frames.count,
            exposureReadings.allSatisfy({ $0["duration_seconds"] != nil }) {
