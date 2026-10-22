@@ -2,12 +2,7 @@ import AVFoundation
 import Foundation
 import UIKit
 
-struct BurstFrame {
-    let width: Int
-    let height: Int
-    let bytesPerRow: Int
-    let data: Data
-}
+typealias BurstFrame = BurstRawFrame
 
 struct BurstProcessResult {
     let jpegData: Data
@@ -28,10 +23,7 @@ enum BurstProcessor {
     static let whiteLevel: Float = 16383
     static let usefullRange: Float = whiteLevel - blackLevel
 
-    struct Shift {
-        let dx: Int
-        let dy: Int
-    }
+    typealias Shift = BurstOffset
 
     enum BurstError: LocalizedError {
         case noFrames
@@ -54,7 +46,8 @@ enum BurstProcessor {
         underExposureEV: Double,
         rotationAngle: Int = 0,
         asShotNeutral: [Double]? = nil,
-        colorTransform: [Double]? = nil
+        colorTransform: [Double]? = nil,
+        noiseProfile: [Double]? = nil
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -71,37 +64,20 @@ enum BurstProcessor {
         let started = CFAbsoluteTimeGetCurrent()
         let pixelCount = width * height
 
-        let sums = UnsafeMutablePointer<UInt32>.allocate(capacity: pixelCount)
-        sums.initialize(repeating: 0, count: pixelCount)
-        let counts = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount)
-        counts.initialize(repeating: 0, count: pixelCount)
-
-        var shifts: [Shift] = []
-        shifts.reserveCapacity(frames.count)
-        for (index, frame) in frames.enumerated() {
-            let shift: Shift
-            if index == 0 {
-                shift = Shift(dx: 0, dy: 0)
-            } else {
-                shift = estimateShift(reference: reference, frame: frame)
-            }
-            shifts.append(shift)
-            accumulate(frame: frame, into: sums, counts: counts, width: width, height: height, shift: shift)
+        let shifts = frames.enumerated().map { index, frame in
+            index == 0 ? Shift(dx: 0, dy: 0) : estimateShift(reference: reference, frame: frame)
         }
-
         let merged = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount)
-        for index in 0..<pixelCount {
-            let count = UInt32(counts[index])
-            if count == 0 {
-                merged[index] = UInt16(blackLevel)
-            } else {
-                merged[index] = UInt16(min(65535, (sums[index] + count / 2) / count))
-            }
+        merged.initialize(repeating: 0, count: pixelCount)
+        do {
+            try BurstFusion.fill(frames: frames, offsets: shifts,
+                                 output: UnsafeMutableBufferPointer(start: merged, count: pixelCount),
+                                 noiseProfile: noiseProfile)
+        } catch {
+            merged.deinitialize(count: pixelCount)
+            merged.deallocate()
+            throw error
         }
-        sums.deinitialize(count: pixelCount)
-        sums.deallocate()
-        counts.deinitialize(count: pixelCount)
-        counts.deallocate()
         defer {
             merged.deinitialize(count: pixelCount)
             merged.deallocate()
@@ -469,35 +445,4 @@ enum BurstProcessor {
         }
     }
 
-    private static func accumulate(
-        frame: BurstFrame,
-        into sums: UnsafeMutablePointer<UInt32>,
-        counts: UnsafeMutablePointer<UInt8>,
-        width: Int,
-        height: Int,
-        shift: Shift
-    ) {
-        let rowBytes = frame.bytesPerRow
-        guard rowBytes >= width * 2 else { return }
-        frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            guard let base = raw.baseAddress else { return }
-            let yStart = max(0, -shift.dy)
-            let yEnd = min(height, height - shift.dy)
-            let xStart = max(0, -shift.dx)
-            let xEnd = min(width, width - shift.dx)
-            guard xStart < xEnd, yStart < yEnd else { return }
-            for y in yStart..<yEnd {
-                let source = base.advanced(by: (y + shift.dy) * rowBytes).assumingMemoryBound(to: UInt16.self)
-                let destination = y * width
-                var x = xStart
-                while x < xEnd {
-                    sums[destination + x] += UInt32(source[x + shift.dx])
-                    if counts[destination + x] < 255 {
-                        counts[destination + x] += 1
-                    }
-                    x += 1
-                }
-            }
-        }
-    }
 }

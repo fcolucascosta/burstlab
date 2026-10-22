@@ -14,6 +14,7 @@ SOURCES = [
     "Apple/BurstDiagnostics.swift",
     "Apple/CameraPreview.swift",
     "Shared/BurstConfig.swift",
+    "Shared/BurstFusion.swift",
 ]
 
 
@@ -105,7 +106,7 @@ def generate():
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "0.2.8",
+        "CFBundleShortVersionString": "0.2.9",
         "CFBundleVersion": "1",
         "NSCameraUsageDescription": "BurstLab usa a camera para capturar e processar fotos computacionais.",
         "NSPhotoLibraryAddUsageDescription": "BurstLab salva as fotos capturadas na sua fototeca.",

@@ -73,6 +73,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstRetries = 0
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
+    private var burstNoiseProfile: [Double]?
     private var burstAsShotNeutral: [Double]?
     private var burstRecordDiagnostics = false
     private var burstReferenceDNG: Data?
@@ -407,6 +408,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstRetries = 0
             self.burstReadinessPolls = 0
             self.burstAsShotNeutral = nil
+            self.burstNoiseProfile = nil
             self.burstRecordDiagnostics = recordDiagnostics
             self.burstReferenceDNG = nil
             self.burstColorMatrix1 = nil
@@ -556,6 +558,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private func captureBurstCalibration(from photo: AVCapturePhoto) {
         let dngKey = kCGImagePropertyDNGDictionary as String
         let dng = photo.metadata[dngKey] as? [String: Any] ?? [:]
+        if let profile = dng["NoiseProfile"] as? [NSNumber] {
+            let values = profile.map { $0.doubleValue }
+            if values.count == 2, values.allSatisfy({ $0.isFinite && $0 >= 0 }) {
+                burstNoiseProfile = values
+            }
+        }
+        burstLog.notice("noise profile present=\(self.burstNoiseProfile != nil, privacy: .public)")
         if dng.isEmpty {
             burstLog.notice("dng metadata ausente no primeiro frame")
             return
@@ -614,6 +623,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
+        let noiseProfile = burstNoiseProfile
         let recordDiagnostics = burstRecordDiagnostics
         let referenceDNG = burstReferenceDNG
         burstReferenceDNG = nil
@@ -665,7 +675,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     underExposureEV: config.underExposureEV,
                     rotationAngle: rotationAngle,
                     asShotNeutral: asShotNeutral,
-                    colorTransform: colorTransform
+                    colorTransform: colorTransform,
+                    noiseProfile: noiseProfile
                 )
                 self.saveBurst(result)
             } catch {
