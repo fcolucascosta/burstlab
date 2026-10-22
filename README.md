@@ -8,6 +8,8 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 ## Documentacao
 
+- [Qualidade e ensaios reproduziveis](docs/quality.md): prioridade fotografica, limites conhecidos e comparacoes com a camera padrao.
+
 - [Pipeline e pesquisa](docs/pipeline.md): o que o Indigo faz, o que vamos implementar, algoritmos e limites do SE.
 - [Build e instalacao no Windows](docs/build.md): GitHub Actions + iLoader.
 - [Roadmap](docs/roadmap.md): fases e criterios de aceite.
