@@ -15,7 +15,7 @@ final class BurstFusionTests: XCTestCase {
         let reference = try XCTUnwrap(fixture["reference"] as? [Double]).map { Float($0) }
         let alternates = try XCTUnwrap(fixture["alternates"] as? [[Double]]).map { $0.map { Float($0) } }
         let expected = try XCTUnwrap(fixture["expected"] as? [Double])
-        let result = try BurstFusion.mergePatch(reference: reference, alternates: alternates, variance: 64)
+        let result = try BurstFusion.mergePatch(reference: reference, alternates: alternates, variance: 64, debiasNoise: false)
         for i in expected.indices { XCTAssertEqual(Double(result[i]), expected[i], accuracy: 0.01) }
     }
 
@@ -69,6 +69,38 @@ final class BurstFusionTests: XCTestCase {
     func testRejectsMalformedPatchAndNonFiniteVariance() {
         XCTAssertThrowsError(try BurstFusion.mergePatch(reference: [1], alternates: [], variance: 64))
         XCTAssertThrowsError(try BurstFusion.mergePatch(reference: [Float](repeating: 1, count: 256), alternates: [], variance: .nan))
+    }
+
+    func testNoiseDebiasedOperatorMatchesIndependentFixture() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "debiased-patch", withExtension: "json", subdirectory: "Fixtures"))
+        let fixture = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let reference = try XCTUnwrap(fixture["reference"] as? [Double]).map { Float($0) }
+        let alternates = try XCTUnwrap(fixture["alternates"] as? [[Double]]).map { $0.map { Float($0) } }
+        let expected = try XCTUnwrap(fixture["expected"] as? [Double])
+        let result = try BurstFusion.mergePatch(reference: reference, alternates: alternates, variance: 64)
+        for i in expected.indices { XCTAssertEqual(Double(result[i]), expected[i], accuracy: 0.01) }
+    }
+
+    func testNoiseFloorCorrectionImprovesStaticNoiseAndPreservesTexture() throws {
+        let truth: [Float] = (0..<256).map { i in 2600 + 100 * sin(Float(i % 16) * .pi / 4) }
+        var state: UInt64 = 20261023
+        var beforeError: Float = 0, afterError: Float = 0
+        var amplitude: Float = 0, amplitudeCount: Float = 0
+        for _ in 0..<32 {
+            let samples: [[Float]] = (0..<8).map { _ in truth.map { value in
+                state = state &* 6364136223846793005 &+ 1442695040888963407
+                return value + Float((state >> 32) & 65535) / 65535 * 120 - 60
+            } }
+            let old = try BurstFusion.mergePatch(reference: samples[0], alternates: Array(samples.dropFirst()), variance: 1200, debiasNoise: false)
+            let new = try BurstFusion.mergePatch(reference: samples[0], alternates: Array(samples.dropFirst()), variance: 1200)
+            for i in truth.indices {
+                beforeError += pow(old[i] - truth[i], 2); afterError += pow(new[i] - truth[i], 2)
+                let signal = truth[i] - 2600
+                amplitude += (new[i] - 2600) * signal; amplitudeCount += signal * signal
+            }
+        }
+        XCTAssertLessThan(afterError, beforeError * 0.9)
+        XCTAssertEqual(amplitude / amplitudeCount, 1, accuracy: 0.02)
     }
 }
 #endif

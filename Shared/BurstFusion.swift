@@ -61,7 +61,7 @@ public enum BurstFusion {
             for i in 0..<256 { sumReal[i] = real[i]; sumImag[i] = imag[i] }
         }
 
-        func add(variance: Float) {
+        func add(variance: Float, debiasNoise: Bool = true) {
             for i in 0..<256 { alternateImag[i] = 0 }
             transform(&alternateReal, &alternateImag, inverse: false)
             // N^2 / 4^2 * 2 * temporalFactor, for an unnormalized forward DFT.
@@ -69,7 +69,12 @@ public enum BurstFusion {
             for i in 0..<256 {
                 let dr = real[i] - alternateReal[i]
                 let di = imag[i] - alternateImag[i]
-                let distance = dr * dr + di * di
+                // An unnormalized 16x16 DFT gives N*variance noise power.
+                // Two independent noisy frames differ by 2*N*variance even
+                // when the scene agrees. Remove that expected noise floor
+                // before interpreting disagreement as scene motion.
+                let noiseDistance = debiasNoise ? max(variance, 0) * 512 : 0
+                let distance = max(dr * dr + di * di - noiseDistance, 0)
                 let referenceWeight = distance / (distance + noisePower)
                 sumReal[i] += alternateReal[i] + referenceWeight * dr
                 sumImag[i] += alternateImag[i] + referenceWeight * di
@@ -84,7 +89,8 @@ public enum BurstFusion {
     }
 
     /// Small deterministic entry point for testing the actual production operator.
-    public static func mergePatch(reference: [Float], alternates: [[Float]], variance: Float) throws -> [Float] {
+    public static func mergePatch(reference: [Float], alternates: [[Float]], variance: Float,
+                                  debiasNoise: Bool = true) throws -> [Float] {
         guard reference.count == 256, reference.allSatisfy({ $0.isFinite }),
               variance.isFinite, variance >= 0,
               alternates.allSatisfy({ $0.count == 256 && $0.allSatisfy({ $0.isFinite }) }) else {
@@ -93,7 +99,7 @@ public enum BurstFusion {
         let work = try Workspace()
         work.real = reference
         work.begin()
-        for alternate in alternates { work.alternateReal = alternate; work.add(variance: variance) }
+        for alternate in alternates { work.alternateReal = alternate; work.add(variance: variance, debiasNoise: debiasNoise) }
         work.finish(frameCount: alternates.count + 1)
         return work.sumReal
     }
