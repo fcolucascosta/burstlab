@@ -64,6 +64,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var requests: [Int64: CaptureRequest] = [:]
     private var burstGeneration = UUID()
     private var savedCameraModes: (exposure: AVCaptureDevice.ExposureMode, focus: AVCaptureDevice.FocusMode, whiteBalance: AVCaptureDevice.WhiteBalanceMode)?
+    private var savedFrameDurations: (min: CMTime, max: CMTime)?
     private var burstActive = false
     private var burstFrames: [BurstFrame] = []
     private var burstRemaining = 0
@@ -472,6 +473,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         do {
                 try device.lockForConfiguration()
                 self.savedCameraModes = (device.exposureMode, device.focusMode, device.whiteBalanceMode)
+                self.savedFrameDurations = (device.activeVideoMinFrameDuration, device.activeVideoMaxFrameDuration)
                 let requested = CMTime(seconds: plan.duration, preferredTimescale: 1_000_000_000)
                 let duration = CMTimeMaximum(CMTimeMinimum(requested, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
                 let iso = min(max(Float(plan.iso), device.activeFormat.minISO), device.activeFormat.maxISO)
@@ -761,8 +763,21 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             if device.isWhiteBalanceModeSupported(saved.whiteBalance) {
                 device.whiteBalanceMode = saved.whiteBalance
             }
+            // Custom long shutters can lengthen the preview frame durations.
+            // Restore their original range after returning exposure to AE.
+            if let durations = savedFrameDurations,
+               CMTimeCompare(durations.min, device.activeVideoMinFrameDuration) != 0 || CMTimeCompare(durations.max, device.activeVideoMaxFrameDuration) != 0 {
+                if CMTimeCompare(durations.min, device.activeVideoMaxFrameDuration) > 0 {
+                    device.activeVideoMaxFrameDuration = durations.max
+                    device.activeVideoMinFrameDuration = durations.min
+                } else {
+                    device.activeVideoMinFrameDuration = durations.min
+                    device.activeVideoMaxFrameDuration = durations.max
+                }
+            }
             device.unlockForConfiguration()
             savedCameraModes = nil
+            savedFrameDurations = nil
         } catch {
             burstLog.error("Falha ao restaurar modos da camera: \(error.localizedDescription, privacy: .public)")
         }
