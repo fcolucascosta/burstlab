@@ -1,0 +1,56 @@
+import XCTest
+@testable import BurstCore
+
+final class BurstToneMapTests: XCTestCase {
+    func testGuidedShadowMapMatchesIndependentNumpyFixture() throws {
+        let url = try XCTUnwrap(Bundle.module.url(forResource: "tone-map", withExtension: "json", subdirectory: "Fixtures"))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
+        let input = try XCTUnwrap(object["luminances"] as? [Double])
+        let expected = try XCTUnwrap(object["gains"] as? [Double])
+        let map = try BurstToneMap(luminances: input, width: 40, height: 32)
+        XCTAssertEqual(map.compression, try XCTUnwrap(object["compression"] as? Double), accuracy: 1e-9)
+        for i in input.indices {
+            XCTAssertEqual(map.gain(x: Double(i % 40), y: Double(i / 40)), expected[i], accuracy: 1e-8)
+        }
+    }
+
+    func testFlatSceneDoesNotReceiveAdaptiveLift() throws {
+        let map = try BurstToneMap(luminances: [Double](repeating: 0.02, count: 30), width: 6, height: 5)
+        XCTAssertEqual(map.compression, 1)
+        XCTAssertEqual(map.gain(x: 2.3, y: -5), 1)
+    }
+
+    func testNeutralRampIsNeutralMonotonicAndHasSmoothHighlightShoulder() {
+        var previous = -1.0
+        for i in 0...1000 {
+            let input = Double(i) / 100
+            let out = BurstToneMap.render(red: input, green: input, blue: input, gain: 1)
+            XCTAssertEqual(out.0, out.1, accuracy: 1e-12)
+            XCTAssertEqual(out.1, out.2, accuracy: 1e-12)
+            XCTAssertGreaterThanOrEqual(out.0, previous)
+            XCTAssertLessThanOrEqual(out.0, 1)
+            previous = out.0
+        }
+        let mid = BurstToneMap.render(red: 0.18, green: 0.18, blue: 0.18, gain: 1)
+        XCTAssertEqual(mid.0, 0.18, accuracy: 1e-12)
+        let bright = BurstToneMap.render(red: 1.2, green: 1.2, blue: 1.2, gain: 1)
+        XCTAssertGreaterThan(bright.0, 0.65)
+        XCTAssertLessThan(bright.0, 1)
+    }
+
+    func testOutOfGamutCompressionPreservesLuminanceAndChromaDirection() {
+        let r = 1.8, g = 0.3, b = -0.1
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b
+        let out = BurstToneMap.render(red: r, green: g, blue: b, gain: 1)
+        XCTAssertEqual(0.2126 * out.0 + 0.7152 * out.1 + 0.0722 * out.2, y, accuracy: 1e-12)
+        XCTAssertEqual((out.0 - y) / (r - y), (out.2 - y) / (b - y), accuracy: 1e-12)
+        for c in [out.0, out.1, out.2] { XCTAssertTrue((0...1).contains(c)) }
+    }
+
+    func testInvalidInputIsRejectedAndGainIsBounded() throws {
+        XCTAssertThrowsError(try BurstToneMap(luminances: [.nan], width: 1, height: 1))
+        XCTAssertThrowsError(try BurstToneMap(luminances: [1], width: 2, height: 1))
+        let out = BurstToneMap.render(red: 0.01, green: 0.01, blue: 0.01, gain: 100)
+        XCTAssertEqual(out.0, 0.02, accuracy: 1e-12)
+    }
+}

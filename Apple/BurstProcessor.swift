@@ -145,27 +145,48 @@ enum BurstProcessor {
             }
         }
 
-        let redLUT = makeLUT(gain: redGain, scale: exposureScale)
-        let greenLUT = makeLUT(gain: 1, scale: exposureScale)
-        let blueLUT = makeLUT(gain: blueGain, scale: exposureScale)
-
         let rangeD = Double(usefullRange)
         let scaleD = Double(exposureScale)
         let blackInt = Int(blackLevel)
+        func linearRGB(_ red: Int, _ green: Int, _ blue: Int) -> (Double, Double, Double) {
+            let lr = Double(max(red, 0) - blackInt) / rangeD
+            let lg = Double(max(green, 0) - blackInt) / rangeD
+            let lb = Double(max(blue, 0) - blackInt) / rangeD
+            if let cc = ccm {
+                return ((cc[0] * lr + cc[1] * lg + cc[2] * lb) * scaleD,
+                        (cc[3] * lr + cc[4] * lg + cc[5] * lb) * scaleD,
+                        (cc[6] * lr + cc[7] * lg + cc[8] * lb) * scaleD)
+            }
+            return (lr * Double(redGain) * scaleD, lg * scaleD, lb * Double(blueGain) * scaleD)
+        }
+        // A 16x16-sensor-pixel thumbnail keeps local adaptation small in memory.
+        // Average linear luminance before taking logarithms in BurstToneMap.
+        let toneBlock = 16
+        let toneWidth = (width + toneBlock - 1) / toneBlock
+        let toneHeight = (height + toneBlock - 1) / toneBlock
+        var thumbnail = [Double](repeating: 0, count: toneWidth * toneHeight)
+        for ty in 0..<toneHeight {
+            for tx in 0..<toneWidth {
+                var sum = 0.0, count = 0
+                for y in stride(from: ty * toneBlock, to: min((ty + 1) * toneBlock, height - 1), by: 2) {
+                    for x in stride(from: tx * toneBlock, to: min((tx + 1) * toneBlock, width - 1), by: 2) {
+                        let r = Int(merged[y * width + x])
+                        let g = (Int(merged[y * width + x + 1]) + Int(merged[(y + 1) * width + x])) / 2
+                        let b = Int(merged[(y + 1) * width + x + 1])
+                        let rgb = linearRGB(r, g, b)
+                        sum += max(0.2126 * rgb.0 + 0.7152 * rgb.1 + 0.0722 * rgb.2, 1e-5)
+                        count += 1
+                    }
+                }
+                thumbnail[ty * toneWidth + tx] = count > 0 ? sum / Double(count) : 0
+            }
+        }
+        let tone = try BurstToneMap(luminances: thumbnail, width: toneWidth, height: toneHeight)
         func gammaIndex(_ value: Double) -> Int {
             let clamped = min(max(value, 0), 1)
             return min(Int(clamped * 4096.0), 4096)
         }
-        let gammaTable: [UInt8]
-        if ccm != nil {
-            var table = [UInt8](repeating: 0, count: 4097)
-            for index in 0...4096 {
-                table[index] = srgbByte(Double(index) / 4096.0)
-            }
-            gammaTable = table
-        } else {
-            gammaTable = []
-        }
+        let gammaTable = (0...4096).map { srgbByte(Double($0) / 4096.0) }
 
         let rgbBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * 3)
         rgbBytes.initialize(repeating: 0, count: pixelCount * 3)
@@ -233,21 +254,13 @@ enum BurstProcessor {
                 }
 
                 let offset = (y0 + x) * 3
-                if let cc = ccm {
-                    let lr = Double(max(red, 0) - blackInt) / rangeD
-                    let lg = Double(max(green, 0) - blackInt) / rangeD
-                    let lb = Double(max(blue, 0) - blackInt) / rangeD
-                    let sr = (cc[0] * lr + cc[1] * lg + cc[2] * lb) * scaleD
-                    let sg = (cc[3] * lr + cc[4] * lg + cc[5] * lb) * scaleD
-                    let sb = (cc[6] * lr + cc[7] * lg + cc[8] * lb) * scaleD
-                    rgbBytes[offset] = gammaTable[gammaIndex(sr)]
-                    rgbBytes[offset + 1] = gammaTable[gammaIndex(sg)]
-                    rgbBytes[offset + 2] = gammaTable[gammaIndex(sb)]
-                } else {
-                    rgbBytes[offset] = redLUT[min(max(red, 0), 65535)]
-                    rgbBytes[offset + 1] = greenLUT[min(max(green, 0), 65535)]
-                    rgbBytes[offset + 2] = blueLUT[min(max(blue, 0), 65535)]
-                }
+                let linear = linearRGB(red, green, blue)
+                let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
+                                     y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
+                let rendered = BurstToneMap.render(red: linear.0, green: linear.1, blue: linear.2, gain: gain)
+                rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
+                rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
+                rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]
             }
         }
 
@@ -376,15 +389,6 @@ enum BurstProcessor {
 
     private static func clampByte(_ value: Float) -> UInt8 {
         UInt8(min(max(value.rounded(), 0), 255))
-    }
-
-    private static func makeLUT(gain: Float, scale: Float) -> [UInt8] {
-        var lut = [UInt8](repeating: 0, count: 65536)
-        for value in 0..<65536 {
-            let linear = max(0, (Float(value) - blackLevel) / usefullRange * scale * gain)
-            lut[value] = srgbByte(Double(min(1, linear)))
-        }
-        return lut
     }
 
     private static func srgbByte(_ linear: Double) -> UInt8 {
