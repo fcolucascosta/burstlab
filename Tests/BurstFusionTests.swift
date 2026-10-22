@@ -31,9 +31,11 @@ final class BurstFusionTests: XCTestCase {
     func testStaticNoisyPatchReducesErrorWithoutSpatialBlur() throws {
         let truth: [Float] = (0..<256).map { Float(($0 * 7) % 29) * 4 + 2400 }
         var samples: [[Float]] = []
-        for frame in 0..<8 {
+        var state: UInt64 = 20261022
+        for _ in 0..<8 {
             samples.append((0..<256).map { i in
-                let noise = Float(((i * 31 + frame * 17) % 61) - 30)
+                state = state &* 6364136223846793005 &+ 1442695040888963407
+                let noise = Float((state >> 32) & 65535) / 65535 * 60 - 30
                 return truth[i] + noise
             })
         }
