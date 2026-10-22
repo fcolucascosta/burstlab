@@ -13,7 +13,7 @@ struct ContentView: View {
             #endif
             VStack(spacing: 12) {
                 HStack {
-                    Text("BurstLab 0.2.6")
+                    Text("BurstLab \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
@@ -69,7 +69,7 @@ struct ContentView: View {
                         Circle().fill(.white).frame(width: 62, height: 62)
                     }
                 }
-                .disabled(!camera.isConfigured || camera.isCapturingBurst)
+                .disabled(!camera.isConfigured || camera.isProbingRaw || camera.isCapturingBurst)
                 .opacity(camera.isConfigured ? 1 : 0.4)
                 .accessibilityLabel("Capturar foto")
             }

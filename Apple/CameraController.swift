@@ -56,6 +56,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var probeStart: CFTimeInterval = 0
     private var probeIntervalStart: CFTimeInterval?
     private var calibrationBuffer: CVPixelBuffer?
+    private var processingActive = false
+    private var singleCaptureActive = false
+    private enum CaptureRequest { case photo, probe, burst }
+    // Access only on sessionQueue; late callbacks cannot enter another capture.
+    private var requests: [Int64: CaptureRequest] = [:]
+    private var burstGeneration = UUID()
+    private var savedCameraModes: (exposure: AVCaptureDevice.ExposureMode, focus: AVCaptureDevice.FocusMode, whiteBalance: AVCaptureDevice.WhiteBalanceMode)?
     private var burstActive = false
     private var burstFrames: [BurstFrame] = []
     private var burstRemaining = 0
@@ -103,6 +110,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func stop() {
         sessionQueue.async {
+            if self.burstActive { self.abortBurst("Burst interrompido ao fechar a camera.") }
+            if self.probeActive { self.finishRawProbe(status: "Sonda interrompida ao fechar a camera.") }
+            self.requests.removeAll()
+            self.singleCaptureActive = false
             if self.session.isRunning {
                 self.session.stopRunning()
             }
@@ -112,13 +123,14 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func capturePhoto() {
         sessionQueue.async {
-            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else {
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive, !self.processingActive, !self.singleCaptureActive else {
                 DispatchQueue.main.async { self.status = "Sessao de camera indisponivel." }
                 return
             }
             let settings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.jpeg])
             settings.photoQualityPrioritization = .quality
-            self.photoOutput.capturePhoto(with: settings, delegate: self)
+            self.singleCaptureActive = true
+            self.submitPhoto(settings, kind: .photo)
         }
     }
 
@@ -195,7 +207,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     func probeRawBurst() {
         sessionQueue.async {
-            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else { return }
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive, !self.processingActive, !self.singleCaptureActive else { return }
             guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
                 DispatchQueue.main.async { self.rawProbeReport = "Nenhum formato RAW disponivel neste aparelho." }
                 return
@@ -218,7 +230,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let settings = AVCapturePhotoSettings(rawPixelFormatType: format)
         settings.photoQualityPrioritization = .speed
         settings.flashMode = .off
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        submitPhoto(settings, kind: .probe)
     }
 
     private func handleRawProbeFrame(_ photo: AVCapturePhoto, error: Error?) {
@@ -345,6 +357,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     }
 
     private func finishRawProbe(status: String) {
+        requests = requests.filter { $0.value != .probe }
         let elapsed = CFAbsoluteTimeGetCurrent() - probeStart
         let validFrames = probeLines.filter { $0.hasPrefix("Frame ") && !$0.contains("erro") }.count
         let rate = elapsed > 0 ? Double(validFrames) / elapsed : 0
@@ -369,14 +382,22 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     func captureBurst() {
         sessionQueue.async {
             self.burstLog.notice("captureBurst configured=\(self.configured, privacy: .public) running=\(self.session.isRunning, privacy: .public) probe=\(self.probeActive, privacy: .public) burst=\(self.burstActive, privacy: .public)")
-            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive else { return }
-            guard let rawFormat = self.photoOutput.availableRawPhotoPixelFormatTypes.first else {
-                DispatchQueue.main.async { self.lastCaptureNote = "RAW indisponivel para o burst." }
+            guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive, !self.processingActive, !self.singleCaptureActive else { return }
+            guard self.photoOutput.availableRawPhotoPixelFormatTypes.contains(kCVPixelFormatType_14Bayer_RGGB) else {
+                DispatchQueue.main.async { self.lastCaptureNote = "Burst requer RAW Bayer RGGB de 14 bits calibrado para este aparelho." }
                 return
             }
+            let rawFormat = kCVPixelFormatType_14Bayer_RGGB
             guard let device = self.photoDevice else { return }
             self.burstConfig = BurstConfig.defaults(for: .photo)
             self.burstActive = true
+            self.burstGeneration = UUID()
+            let generation = self.burstGeneration
+            self.sessionQueue.asyncAfter(deadline: .now() + 15) {
+                if self.burstActive && self.burstGeneration == generation {
+                    self.abortBurst("Tempo limite do burst excedido.")
+                }
+            }
             self.burstFormat = rawFormat
             self.burstFrames.removeAll()
             self.burstRemaining = self.burstConfig.frameCount
@@ -405,6 +426,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             }
             do {
                 try device.lockForConfiguration()
+                self.savedCameraModes = (device.exposureMode, device.focusMode, device.whiteBalanceMode)
                 let factor = pow(2.0, self.burstConfig.underExposureEV)
                 let scaled = CMTimeMultiplyByFloat64(device.exposureDuration, multiplier: factor)
                 let duration = CMTimeMaximum(CMTimeMinimum(scaled, device.activeFormat.maxExposureDuration), device.activeFormat.minExposureDuration)
@@ -413,11 +435,15 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 if device.isFocusModeSupported(.locked) {
                     device.focusMode = .locked
                 }
+                if device.isWhiteBalanceModeSupported(.locked) {
+                    device.whiteBalanceMode = .locked
+                }
                 let canCustom = device.isExposureModeSupported(.custom)
                 if canCustom {
                     device.setExposureModeCustom(duration: duration, iso: iso) { actual in
                         self.burstLog.notice("exposure settled value=\(actual.value, privacy: .public) timescale=\(actual.timescale, privacy: .public) seconds=\(CMTimeGetSeconds(actual), privacy: .public)")
                         self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
+                            guard self.burstGeneration == generation else { return }
                             self.captureBurstFrame()
                         }
                     }
@@ -427,6 +453,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 device.unlockForConfiguration()
                 if !canCustom {
                     self.sessionQueue.asyncAfter(deadline: .now() + 0.4) {
+                        guard self.burstGeneration == generation else { return }
                         self.captureBurstFrame()
                     }
                 }
@@ -448,7 +475,11 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 if burstReadinessPolls < 20 {
                     burstReadinessPolls += 1
                     burstLog.notice("output not ready readiness=\(String(describing: readiness), privacy: .public) poll=\(self.burstReadinessPolls, privacy: .public)")
-                    sessionQueue.asyncAfter(deadline: .now() + 0.1) { self.captureBurstFrame() }
+                    let generation = burstGeneration
+                    sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                        guard self.burstGeneration == generation else { return }
+                        self.captureBurstFrame()
+                    }
                     return
                 }
                 abortBurst("Burst: camera nao ficou pronta (\(String(describing: readiness))).")
@@ -461,7 +492,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let settings = AVCapturePhotoSettings(rawPixelFormatType: burstFormat)
         settings.photoQualityPrioritization = .speed
         settings.flashMode = .off
-        photoOutput.capturePhoto(with: settings, delegate: self)
+        submitPhoto(settings, kind: .burst)
     }
 
     private func handleBurstFrame(_ photo: AVCapturePhoto, error: Error?) {
@@ -479,7 +510,11 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 DispatchQueue.main.async {
                     self.lastCaptureNote = "Burst: repetindo frame \(frame)/\(self.burstConfig.frameCount) (\(detail))"
                 }
-                sessionQueue.asyncAfter(deadline: .now() + 0.6) { self.captureBurstFrame() }
+                let generation = burstGeneration
+                sessionQueue.asyncAfter(deadline: .now() + 0.6) {
+                    guard self.burstGeneration == generation else { return }
+                    self.captureBurstFrame()
+                }
                 return
             }
             abortBurst("Burst interrompido (frame \(burstConfig.frameCount - burstRemaining + 1)): \(detail)")
@@ -557,7 +592,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let width = CVPixelBufferGetWidth(buffer)
         let height = CVPixelBufferGetHeight(buffer)
         let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
-        guard width > 0, height > 0, bytesPerRow >= width * 2,
+        guard CVPixelBufferGetPixelFormatType(buffer) == kCVPixelFormatType_14Bayer_RGGB,
+              BurstRawLayout.isValid(width: width, height: height,
+                                     bytesPerRow: bytesPerRow, byteCount: CVPixelBufferGetDataSize(buffer)),
               let base = CVPixelBufferGetBaseAddress(buffer) else { return nil }
         let data = Data(bytes: UnsafeRawPointer(base), count: bytesPerRow * height)
         return BurstFrame(width: width, height: height, bytesPerRow: bytesPerRow, data: data)
@@ -590,10 +627,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
         burstFrames.removeAll()
         burstActive = false
+        processingActive = true
         restoreCameraModes()
         burstLog.notice("capture done frames=\(frames.count, privacy: .public) elapsed=\(CFAbsoluteTimeGetCurrent() - self.burstStart, privacy: .public)")
         DispatchQueue.main.async {
-            self.isCapturingBurst = false
             self.status = "Processando burst..."
             self.lastCaptureNote = "Burst: \(frames.count) frames, alinhando e combinando..."
         }
@@ -608,6 +645,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 )
                 self.saveBurst(result)
             } catch {
+                self.completeBurstProcessing()
                 self.burstLog.notice("process error \(error.localizedDescription, privacy: .public)")
                 DispatchQueue.main.async {
                     self.status = "Falha no burst"
@@ -618,23 +656,30 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     }
 
     private func restoreCameraModes() {
-        guard let device = photoDevice else { return }
+        guard let device = photoDevice, let saved = savedCameraModes else { return }
         do {
             try device.lockForConfiguration()
-            if device.isExposureModeSupported(.continuousAutoExposure) {
-                device.exposureMode = .continuousAutoExposure
+            if device.isExposureModeSupported(saved.exposure) {
+                device.exposureMode = saved.exposure
             }
-            if device.isFocusModeSupported(.continuousAutoFocus) {
-                device.focusMode = .continuousAutoFocus
+            if device.isFocusModeSupported(saved.focus) {
+                device.focusMode = saved.focus
+            }
+            if device.isWhiteBalanceModeSupported(saved.whiteBalance) {
+                device.whiteBalanceMode = saved.whiteBalance
             }
             device.unlockForConfiguration()
+            savedCameraModes = nil
         } catch {
+            burstLog.error("Falha ao restaurar modos da camera: \(error.localizedDescription, privacy: .public)")
         }
     }
 
     private func abortBurst(_ message: String) {
         burstLog.notice("abort \(message, privacy: .public)")
         burstActive = false
+        burstGeneration = UUID()
+        requests = requests.filter { $0.value != .burst }
         burstFrames.removeAll()
         restoreCameraModes()
         DispatchQueue.main.async {
@@ -644,12 +689,20 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    private func completeBurstProcessing() {
+        sessionQueue.async {
+            self.processingActive = false
+            DispatchQueue.main.async { self.isCapturingBurst = false }
+        }
+    }
+
     private func saveBurst(_ result: BurstProcessResult) {
         let megabytes = Double(result.jpegData.count) / 1_048_576
         let shifts = result.shifts.dropFirst().map { "(\($0.dx),\($0.dy))" }.joined(separator: " ")
         let shiftText = shifts.isEmpty ? "0" : shifts
         PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
             guard status == .authorized || status == .limited else {
+                self.completeBurstProcessing()
                 DispatchQueue.main.async {
                     self.status = "Burst processado"
                     self.lastCaptureNote = "Permissao de fototeca negada."
@@ -659,6 +712,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             PHPhotoLibrary.shared().performChanges {
                 PHAssetCreationRequest.forAsset().addResource(with: .photo, data: result.jpegData, options: nil)
             } completionHandler: { success, error in
+                self.completeBurstProcessing()
                 DispatchQueue.main.async {
                 if success {
                     self.status = "Burst pronto"
@@ -688,15 +742,50 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    private func submitPhoto(_ settings: AVCapturePhotoSettings, kind: CaptureRequest) {
+        let id = settings.uniqueID
+        requests[id] = kind
+        photoOutput.capturePhoto(with: settings, delegate: self)
+        sessionQueue.asyncAfter(deadline: .now() + 10) {
+            guard let pending = self.requests.removeValue(forKey: id) else { return }
+            switch pending {
+            case .burst: self.abortBurst("Tempo limite aguardando frame RAW.")
+            case .probe: self.finishRawProbe(status: "Tempo limite aguardando RAW.")
+            case .photo:
+                self.singleCaptureActive = false
+                DispatchQueue.main.async { self.lastCaptureNote = "Tempo limite aguardando foto." }
+            }
+        }
+    }
+
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        guard let error else { return }
+        sessionQueue.async {
+            guard let kind = self.requests.removeValue(forKey: resolvedSettings.uniqueID) else { return }
+            switch kind {
+            case .burst: self.abortBurst("Falha de captura: \(error.localizedDescription)")
+            case .probe: self.finishRawProbe(status: "Falha de captura: \(error.localizedDescription)")
+            case .photo:
+                self.singleCaptureActive = false
+                DispatchQueue.main.async { self.lastCaptureNote = "Falha: \(error.localizedDescription)" }
+            }
+        }
+    }
+
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        if probeActive {
-            sessionQueue.async { self.handleRawProbeFrame(photo, error: error) }
-            return
+        sessionQueue.async {
+            guard let kind = self.requests.removeValue(forKey: photo.resolvedSettings.uniqueID) else { return }
+            switch kind {
+            case .probe: self.handleRawProbeFrame(photo, error: error)
+            case .burst: self.handleBurstFrame(photo, error: error)
+            case .photo:
+                self.singleCaptureActive = false
+                self.saveSinglePhoto(photo, error: error)
+            }
         }
-        if burstActive {
-            sessionQueue.async { self.handleBurstFrame(photo, error: error) }
-            return
-        }
+    }
+
+    private func saveSinglePhoto(_ photo: AVCapturePhoto, error: Error?) {
         if let error {
             DispatchQueue.main.async { self.lastCaptureNote = "Falha: \(error.localizedDescription)" }
             return
