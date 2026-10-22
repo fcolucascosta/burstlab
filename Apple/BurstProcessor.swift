@@ -364,12 +364,10 @@ enum BurstProcessor {
                 let centerLuma = Float(luma[centerIndex])
                 let shadow = 1.0 - min(centerLuma, 110.0) / 110.0
                 let threshold = 14.0 + shadow * 20.0
-                let lumaBlend = 0.25 + shadow * 0.25
                 let xStart = max(0, x - radius)
                 let xEnd = min(width - 1, x + radius)
                 var chromaRed: Float = 0
                 var chromaBlue: Float = 0
-                var lumaSum: Float = 0
                 var weightSum: Float = 0
                 for neighborY in yStart...yEnd {
                     let row = neighborY * width
@@ -382,12 +380,13 @@ enum BurstProcessor {
                         let neighborLuma = Float(luma[neighborIndex])
                         chromaRed += (Float(source[offset]) - neighborLuma) * weight
                         chromaBlue += (Float(source[offset + 2]) - neighborLuma) * weight
-                        lumaSum += neighborLuma * weight
                         weightSum += weight
                     }
                 }
                 guard weightSum > 0 else { continue }
-                let outputLuma = centerLuma * (1.0 - lumaBlend) + (lumaSum / weightSum) * lumaBlend
+                // Preserve the merged luminance texture. The spatial filter only
+                // averages chroma; temporal merge remains responsible for luma noise.
+                let outputLuma = centerLuma
                 let outputRed = outputLuma + chromaRed / weightSum
                 let outputBlue = outputLuma + chromaBlue / weightSum
                 let outputGreen = (outputLuma - 0.299 * outputRed - 0.114 * outputBlue) / 0.587
