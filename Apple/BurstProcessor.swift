@@ -67,9 +67,10 @@ enum BurstProcessor {
 
         let started = CFAbsoluteTimeGetCurrent()
         let pixelCount = width * height
+        let products = exposureProducts ?? []
         let hdrRatio: Double?
         if !highlightFrames.isEmpty {
-            guard usesRobustMerge, let products = exposureProducts, products.count == frames.count else {
+            guard usesRobustMerge, products.count == frames.count else {
                 throw BurstHDR.Failure.invalidBracket
             }
             hdrRatio = try BurstHDR.ratio(products: products, shortIndices: highlightFrames)
@@ -77,7 +78,7 @@ enum BurstProcessor {
         let referenceProfiles = profiles(for: reference, signalScale: hdrRatio == nil ? nil : 1)
         let shifts = frames.enumerated().map { index, frame in
             guard index > 0, let referenceProfiles else { return Shift(dx: 0, dy: 0) }
-            let scale = hdrRatio != nil ? (exposureProducts![0] / exposureProducts![index]) : nil
+            let scale: Double? = hdrRatio != nil ? (products[0] / products[index]) : nil
             guard let current = profiles(for: frame, signalScale: scale) else { return Shift(dx: 0, dy: 0) }
             return Shift(dx: BurstAlignment.bestShift(referenceProfiles.columns, current.columns, maxShift: 64),
                          dy: BurstAlignment.bestShift(referenceProfiles.rows, current.rows, maxShift: 64))
