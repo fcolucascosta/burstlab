@@ -4,7 +4,7 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual (0.3.0):** pipeline experimental de 8 RAW: alinhamento por translacao inteira par, fusao por frequencia ancorada no primeiro frame, demosaic, cor derivada do DNG, tom local limitado, compressao de realces/gamut e denoise cromatico. Testes numericos e replay dos RAWs reais sustentam o algoritmo; qualidade, ghosting, latencia e pico de memoria da nova versao ainda precisam de validacao no SE. Alinhamento local/subpixel, Night, Long Exposure e saida HDR com gain map continuam pendentes.
+**Estado atual (0.3.1):** pipeline experimental de 8 RAW: alinhamento por translacao inteira par, fusao por frequencia ancorada no primeiro frame, demosaic, cor derivada do DNG, exposicao de renderizacao por luminancia logaritmica, tom local limitado, compressao de realces/gamut e denoise cromatico. Na 0.3.0 o usuario relatou grande melhora e ausencia de arrasto na captura externa, mas brilho, cor e ruido ainda ficaram aquem do desejado. A 0.3.1 isola o medidor de brilho e adiciona tempos por etapa; aceite fisico pendente. Alinhamento local/subpixel, Night, Long Exposure e saida HDR com gain map continuam pendentes.
 
 ## Documentacao
 

@@ -25,7 +25,19 @@ Na 0.3.0 o acabamento trabalha antes do clipping/gamma: um mapa guiado de lumina
 
 Um burst real externo (ISO 32, aproximadamente 1/725 s) foi reprocessado offline com a mesma entrada para media, fusao e acabamento. A inspecao visual mostra reducao dos rastros dos carros e sombras mais legiveis; as previas usam agrupamento CFA 2x2, sem o demosaic e filtro cromatico finais. Isso nao mede qualidade da nova captura instalada, nem demonstra superioridade sobre a camera padrao. Testes Swift verificam FFT contra operador externo, integridade Bayer, ruido sintetico, mapa de tom contra NumPy/SciPy e propriedades de gamut/neutralidade.
 
-## Corrigir a metodologia anterior
+## Exposicao e generalizacao: 0.3.1
+
+O retorno no SE confirmou 0.3.0 instalada; o usuario relatou ausencia de arrasto nessa captura, com brilho baixo, pouca saturacao e ruido visivel. Nao extrapolar esse resultado para outras cenas.
+
+A 0.3.1 muda somente o algoritmo de exposicao de renderizacao: media geometrica da luminancia linear sRGB em thumbnail, extremos de 1% aparados, piso para log e limites absolutos de ganho 0,5..24. A mediana passa a ser diagnostica. A ideia de medir a cena pela luminancia logaritmica vem de [Reinhard et al., 2002](https://www-old.cs.utah.edu/docs/techreports/2002/pdf/UUCS-02-001.pdf); nao implementamos o operador completo do artigo. Key continua 0,18, e a identificacao automatica de cenas intencionalmente claras/escuras continua pendente.
+
+Replays com primeiro RAW, mantendo o restante do acabamento, resultaram em aproximadamente +0,20 EV no interior ISO640, +0,56 EV no exterior claro e +0,61 EV no crepusculo. Previas CFA 2x2 nao avaliam detalhe nem ruido final. O medidor no app usa o mosaico fundido, portanto seus valores podem diferir. Testes incluem uma cena bimodal que atravessa 50% de area clara, onde a mediana pode saltar com pequeno reenquadramento. Comparar verde com luminancia mediana mudou apenas 1-2% nas tres cenas; essa diferenca isolada nao explica o escurecimento.
+
+Com a coleta RAW ativada, processing.json registra tempo por etapa, estatisticas do medidor, deslocamentos e disponibilidade de NoiseProfile no callback. Os tempos excluem exportacao RAW e salvamento na fototeca. Nenhuma medida de pico de memoria foi adicionada.
+
+Cor e denoise permanecem iguais a 0.3.0. Clarear pode tornar ruido mais visivel. A analise exploratoria dos pesos mostra contribuicoes temporais diferentes entre regioes/frequencias; o proximo ensaio de ruido precisa considerar ruido residual, movimento e textura, em vez de supor que oito frames contribuem igualmente. Antes de aprovar um look geral, ampliar a coleta para iluminantes diversos, pele, folhagem, contraluz e noite apoiada. Os tres bursts atuais nao comprovam generalizacao.
+
+## Metricas e comparacoes
 
 Saturacao HSV media igual a da camera padrao nao demonstra fidelidade ou agradabilidade de cor. Variancia do Laplaciano pode crescer com ruido ou sharpening; sozinha nao demonstra detalhe. Desvio padrao de um recorte pode misturar textura, gradiente de iluminacao e ruido. Comparacoes entre JPEGs com enquadramento/exposicao diferentes sao exploratorias, nao criterios de aprovacao.
 
