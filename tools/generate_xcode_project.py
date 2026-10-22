@@ -11,6 +11,7 @@ SOURCES = [
     "Apple/ContentView.swift",
     "Apple/CameraController.swift",
     "Apple/BurstProcessor.swift",
+    "Apple/BurstDiagnostics.swift",
     "Apple/CameraPreview.swift",
     "Shared/BurstConfig.swift",
 ]
@@ -111,6 +112,8 @@ def generate():
         "UILaunchScreen": {},
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "LSRequiresIPhoneOS": True,
+        "UIFileSharingEnabled": True,
+        "LSSupportsOpeningDocumentsInPlace": True,
     }
     (ROOT / "Apple" / "Info-iOS.plist").write_bytes(plistlib.dumps(info))
 

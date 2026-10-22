@@ -41,6 +41,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var isProbingRaw = false
     @Published var rawProbeReport: String?
     @Published var isCapturingBurst = false
+    @Published var diagnosticNote = ""
 
     let session = AVCaptureSession()
 
@@ -73,6 +74,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
     private var burstAsShotNeutral: [Double]?
+    private var burstRecordDiagnostics = false
+    private var burstReferenceDNG: Data?
     private var burstColorMatrix1: [Double]?
     private var burstColorMatrix2: [Double]?
     private var burstIlluminant1 = 17
@@ -379,7 +382,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
-    func captureBurst() {
+    func captureBurst(recordDiagnostics: Bool = false) {
         sessionQueue.async {
             self.burstLog.notice("captureBurst configured=\(self.configured, privacy: .public) running=\(self.session.isRunning, privacy: .public) probe=\(self.probeActive, privacy: .public) burst=\(self.burstActive, privacy: .public)")
             guard self.configured, self.session.isRunning, !self.probeActive, !self.burstActive, !self.processingActive, !self.singleCaptureActive else { return }
@@ -404,6 +407,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstRetries = 0
             self.burstReadinessPolls = 0
             self.burstAsShotNeutral = nil
+            self.burstRecordDiagnostics = recordDiagnostics
+            self.burstReferenceDNG = nil
             self.burstColorMatrix1 = nil
             self.burstColorMatrix2 = nil
             self.burstIlluminant1 = 17
@@ -423,6 +428,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 self.isCapturingBurst = true
                 self.status = "Burst: travando exposicao..."
                 self.lastCaptureNote = ""
+                self.diagnosticNote = ""
             }
             do {
                 try device.lockForConfiguration()
@@ -523,6 +529,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         burstRetries = 0
         if burstFrames.isEmpty {
             self.captureBurstCalibration(from: photo)
+            if burstRecordDiagnostics {
+                burstReferenceDNG = photo.fileDataRepresentation()
+            }
         }
         guard let pixelBuffer = photo.pixelBuffer else {
             abortBurst("Burst sem pixel buffer RAW.")
@@ -605,6 +614,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let rotationAngle = burstRotationAngle
         let asShotNeutral = burstAsShotNeutral
+        let recordDiagnostics = burstRecordDiagnostics
+        let referenceDNG = burstReferenceDNG
+        burstReferenceDNG = nil
         let matrix1 = burstColorMatrix1
         let matrix2 = burstColorMatrix2
         let temperature1 = BurstColorMatrix.temperature(forIlluminant: burstIlluminant1) ?? 2856
@@ -635,6 +647,18 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.lastCaptureNote = "Burst: \(frames.count) frames, alinhando e combinando..."
         }
         processingQueue.async {
+            if recordDiagnostics {
+                do {
+                    let directory = try BurstDiagnostics.save(frames: frames, referenceDNG: referenceDNG,
+                                                              rotation: rotationAngle, neutral: asShotNeutral,
+                                                              transform: colorTransform)
+                    DispatchQueue.main.async {
+                        self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
+                    }
+                } catch {
+                    DispatchQueue.main.async { self.diagnosticNote = "Falha ao salvar ensaio: \(error.localizedDescription)" }
+                }
+            }
             do {
                 let result = try BurstProcessor.process(
                     frames: frames,
@@ -681,6 +705,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         burstGeneration = UUID()
         requests = requests.filter { $0.value != .burst }
         burstFrames.removeAll()
+        burstReferenceDNG = nil
         restoreCameraModes()
         DispatchQueue.main.async {
             self.isCapturingBurst = false

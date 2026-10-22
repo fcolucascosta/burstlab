@@ -4,6 +4,7 @@
 96FB5EF97841BB0C7592C4EE = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Apple/ContentView.swift"; sourceTree = SOURCE_ROOT; };
 F4EDA62BACDB67DB5D31B8F2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Apple/CameraController.swift"; sourceTree = SOURCE_ROOT; };
 A4F54F29C5E3F19473E27FA2 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Apple/BurstProcessor.swift"; sourceTree = SOURCE_ROOT; };
+C2F566E3D5DD268123235BB5 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Apple/BurstDiagnostics.swift"; sourceTree = SOURCE_ROOT; };
 5D951EBC7FBA9ED08B2B6AF3 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Apple/CameraPreview.swift"; sourceTree = SOURCE_ROOT; };
 0A1EF4EE9C406ECD37A05211 = { isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Shared/BurstConfig.swift"; sourceTree = SOURCE_ROOT; };
 D2C04541C4E6F4F58942E341 = { isa = PBXFileReference; explicitFileType = wrapper.application; path = "BurstLab-iOS.app"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -11,9 +12,10 @@ FC14A454029C543E80A65BA7 = { isa = PBXBuildFile; fileRef = 13A3E6054ECCBC8E7D933
 8C7BCAC0B842B20E0559F15E = { isa = PBXBuildFile; fileRef = 96FB5EF97841BB0C7592C4EE; };
 4774D618CD84236E692F6D05 = { isa = PBXBuildFile; fileRef = F4EDA62BACDB67DB5D31B8F2; };
 9CEC6497437E845A8A487103 = { isa = PBXBuildFile; fileRef = A4F54F29C5E3F19473E27FA2; };
+A93B478154B25527AA4BBA0C = { isa = PBXBuildFile; fileRef = C2F566E3D5DD268123235BB5; };
 34718C5CD68B7B0E77DAAF01 = { isa = PBXBuildFile; fileRef = 5D951EBC7FBA9ED08B2B6AF3; };
 1DA63BBAD363A9127D6BEFB0 = { isa = PBXBuildFile; fileRef = 0A1EF4EE9C406ECD37A05211; };
-40FF3B2248B48293852DFFA1 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FC14A454029C543E80A65BA7, 8C7BCAC0B842B20E0559F15E, 4774D618CD84236E692F6D05, 9CEC6497437E845A8A487103, 34718C5CD68B7B0E77DAAF01, 1DA63BBAD363A9127D6BEFB0); runOnlyForDeploymentPostprocessing = 0; };
+40FF3B2248B48293852DFFA1 = { isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (FC14A454029C543E80A65BA7, 8C7BCAC0B842B20E0559F15E, 4774D618CD84236E692F6D05, 9CEC6497437E845A8A487103, A93B478154B25527AA4BBA0C, 34718C5CD68B7B0E77DAAF01, 1DA63BBAD363A9127D6BEFB0); runOnlyForDeploymentPostprocessing = 0; };
 FD98CD4314D17FE7953003C9 = { isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 91F8E13DEB73A14EF33FE707 = { isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
 6361D9FF2F03F00E27F276B8 = { isa = XCBuildConfiguration; buildSettings = { SDKROOT = "iphoneos"; PRODUCT_NAME = "BurstLab-iOS"; PRODUCT_BUNDLE_IDENTIFIER = "dev.lucas.burstlab.ios"; INFOPLIST_FILE = "Apple/Info-iOS.plist"; GENERATE_INFOPLIST_FILE = "NO"; CODE_SIGN_STYLE = "Automatic"; SWIFT_VERSION = "5.0"; ENABLE_USER_SCRIPT_SANDBOXING = "YES"; SWIFT_OPTIMIZATION_LEVEL = "-Onone"; SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG"; DEBUG_INFORMATION_FORMAT = "dwarf"; IPHONEOS_DEPLOYMENT_TARGET = "16.0"; TARGETED_DEVICE_FAMILY = "1"; SUPPORTED_PLATFORMS = "iphoneos iphonesimulator"; }; name = Debug; };
@@ -21,7 +23,7 @@ FD98CD4314D17FE7953003C9 = { isa = PBXFrameworksBuildPhase; buildActionMask = 21
 CC0BF2C220AEDB1F1BFCD562 = { isa = XCConfigurationList; buildConfigurations = (6361D9FF2F03F00E27F276B8, 5F61020D2805984B30F43F05); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
 1BFFF1F17D43DFD358F02FD2 = { isa = PBXNativeTarget; buildConfigurationList = CC0BF2C220AEDB1F1BFCD562; buildPhases = (40FF3B2248B48293852DFFA1, FD98CD4314D17FE7953003C9, 91F8E13DEB73A14EF33FE707); buildRules = (); dependencies = (); name = "BurstLab-iOS"; productName = "BurstLab-iOS"; productReference = D2C04541C4E6F4F58942E341; productType = "com.apple.product-type.application"; };
 FBDC4F23F93125BBEEAE800C = { isa = PBXGroup; children = (D2C04541C4E6F4F58942E341); name = Products; sourceTree = "<group>"; };
-DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; children = (13A3E6054ECCBC8E7D933ED5, 96FB5EF97841BB0C7592C4EE, F4EDA62BACDB67DB5D31B8F2, A4F54F29C5E3F19473E27FA2, 5D951EBC7FBA9ED08B2B6AF3, 0A1EF4EE9C406ECD37A05211, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
+DC76E9F0C0006E8F919E0C51 = { isa = PBXGroup; children = (13A3E6054ECCBC8E7D933ED5, 96FB5EF97841BB0C7592C4EE, F4EDA62BACDB67DB5D31B8F2, A4F54F29C5E3F19473E27FA2, C2F566E3D5DD268123235BB5, 5D951EBC7FBA9ED08B2B6AF3, 0A1EF4EE9C406ECD37A05211, FBDC4F23F93125BBEEAE800C); sourceTree = "<group>"; };
 89E1FD6268CC0F221A2BE178 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; }; name = Debug; };
 E6DE6C99132752C914FEF632 = { isa = XCBuildConfiguration; buildSettings = { CLANG_ENABLE_MODULES = YES; }; name = Release; };
 862894B703A6DEDF96A9DD6C = { isa = XCConfigurationList; buildConfigurations = (89E1FD6268CC0F221A2BE178, E6DE6C99132752C914FEF632); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };

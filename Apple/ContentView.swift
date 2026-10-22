@@ -4,6 +4,7 @@ import UIKit
 struct ContentView: View {
     @StateObject private var camera = CameraController()
     @State private var showReport = false
+    @State private var recordDiagnostics = false
 
     var body: some View {
         ZStack {
@@ -40,7 +41,7 @@ struct ContentView: View {
                     .font(.footnote)
                     .foregroundStyle(.white.opacity(0.85))
                 Button {
-                    camera.captureBurst()
+                    camera.captureBurst(recordDiagnostics: recordDiagnostics)
                 } label: {
                     Text(camera.isCapturingBurst ? "Burst em andamento..." : "Foto burst (8 RAW)")
                         .font(.footnote.weight(.semibold))
@@ -78,7 +79,9 @@ struct ContentView: View {
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
         .sheet(isPresented: $showReport) {
-            CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport, fallback: camera.status)
+            CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport,
+                                 fallback: camera.status, diagnosticNote: camera.diagnosticNote,
+                                 recordDiagnostics: $recordDiagnostics)
         }
     }
 }
@@ -88,6 +91,8 @@ struct CapabilityReportView: View {
     let capabilities: CaptureCapabilities?
     let rawProbe: String?
     let fallback: String
+    let diagnosticNote: String
+    @Binding var recordDiagnostics: Bool
 
     private var reportText: String {
         var parts: [String] = []
@@ -105,10 +110,16 @@ struct CapabilityReportView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                Text(reportText)
-                    .font(.caption.monospaced())
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                VStack(alignment: .leading, spacing: 16) {
+                    Toggle("Guardar RAWs para comparacao", isOn: $recordDiagnostics)
+                    Text("Opcional: guarda cerca de 220 MB por burst em Arquivos > No Meu iPhone > BurstLab > Ensaios. A foto continua sendo salva na fototeca. Apague os ensaios depois de copiar para o computador.")
+                        .font(.caption)
+                    if !diagnosticNote.isEmpty { Text(diagnosticNote).font(.caption) }
+                    Text(reportText)
+                        .font(.caption.monospaced())
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding()
             }
             .navigationTitle("Capacidades")
             .navigationBarTitleDisplayMode(.inline)
