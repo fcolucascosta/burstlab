@@ -133,14 +133,7 @@ struct ContentView: View {
                 .disabled(busy)
                 .accessibilityLabel("Capturar \(selectedMode.title)")
                 Spacer()
-                Button { camera.capturePhoto() } label: {
-                    VStack(spacing: 5) {
-                        Image(systemName: "camera.badge.ellipsis").font(.title2)
-                        Text("Referencia").font(.system(size: 9))
-                    }.frame(width: 58)
-                }
-                .disabled(busy)
-                .accessibilityLabel("Capturar foto de referencia pelo sistema")
+                Color.clear.frame(width: 48, height: 48).accessibilityHidden(true)
             }
             .padding(.horizontal, 30)
             Text(busy ? camera.status : (camera.focusHint.isEmpty ? modeHint : camera.focusHint))
