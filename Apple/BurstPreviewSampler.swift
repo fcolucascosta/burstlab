@@ -28,8 +28,11 @@ final class BurstPreviewSampler {
             let x = Double(i) / 255
             return x <= 0.04045 ? x / 12.92 : pow((x + 0.055) / 1.055, 2.4)
         }
-        let luminances = (0..<(w * h)).map { i in
-            0.2126 * decode[Int(rgba[4 * i])] + 0.7152 * decode[Int(rgba[4 * i + 1])] + 0.0722 * decode[Int(rgba[4 * i + 2])]
+        let luminances: [Double] = (0..<(w * h)).map { i -> Double in
+            let r = decode[Int(rgba[4 * i])]
+            let g = decode[Int(rgba[4 * i + 1])]
+            let b = decode[Int(rgba[4 * i + 2])]
+            return 0.2126 * r + 0.7152 * g + 0.0722 * b
         }
         return BurstPreviewSample(reference: BurstPreviewReference(luminances: luminances, width: w, height: h),
                                   rgba: Data(rgba), timestamp: CFAbsoluteTimeGetCurrent())

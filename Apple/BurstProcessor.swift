@@ -389,6 +389,7 @@ enum BurstProcessor {
                             "adjustment_over_luminance_median_ev": meter.adjustmentEV,
                             "preview_available": previewReference == nil ? 0 : 1,
                             "preview_tone_used": previewTone == nil ? 0 : 1,
+                            "preview_contrast_curve_used": previewTone?.usesContrastCurve == true ? 1 : 0,
                             "preview_scene_correlation": previewTone?.correlation ?? 0,
                             "preview_median_correction_ev": previewTone?.medianCorrectionEV ?? 0,
                             "hdr_exposure_ratio": hdrRatio ?? 1,

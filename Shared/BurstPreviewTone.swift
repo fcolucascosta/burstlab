@@ -17,8 +17,10 @@ public struct BurstPreviewReference {
 public struct BurstPreviewTone {
     public let correlation: Double
     public let medianCorrectionEV: Double
+    public var usesContrastCurve: Bool { flatGain == nil }
     private let input: [Double]
     private let output: [Double]
+    private let flatGain: Double?
 
     public init?(rendered: [Double], width: Int, height: Int, reference: BurstPreviewReference) {
         func valid(_ values: [Double], _ w: Int, _ h: Int) -> Bool {
@@ -40,12 +42,23 @@ public struct BurstPreviewTone {
             covariance += (a[i] - am) * (b[i] - bm)
             va += pow(a[i] - am, 2); vb += pow(b[i] - bm, 2)
         }
-        // A nearly flat/dark frame cannot constrain a contrast curve reliably.
-        guard va / Double(a.count) > 0.02, vb / Double(b.count) > 0.02 else { return nil }
+        let sortedSource = source.sorted(), sortedTarget = target.sorted()
+        let sourceMedian = sortedSource[sortedSource.count / 2]
+        let targetMedian = sortedTarget[sortedTarget.count / 2]
+        if va / Double(a.count) <= 0.02 || vb / Double(b.count) <= 0.02 {
+            // Two uniform views still constrain brightness, e.g. a black panel.
+            // A uniform proxy of a structured scene is not a usable reference.
+            guard va / Double(a.count) <= 0.02, vb / Double(b.count) <= 0.02,
+                  sourceMedian > 1e-5, targetMedian > 1e-5 else { return nil }
+            let gain = targetMedian * exp2(0.15 * pow(1 - targetMedian, 2)) / sourceMedian
+            guard gain >= 1.0 / 16, gain <= 4 else { return nil }
+            input = []; output = []; flatGain = gain
+            correlation = 0; medianCorrectionEV = log2(gain)
+            return
+        }
         let agreement = covariance / sqrt(va * vb)
         guard agreement >= 0.75 else { return nil }
         correlation = agreement
-        let sortedSource = source.sorted(), sortedTarget = target.sorted()
         func percentile(_ values: [Double], _ p: Double) -> Double {
             let position = p * Double(values.count - 1)
             let lo = Int(position), hi = min(lo + 1, values.count - 1)
@@ -66,11 +79,12 @@ public struct BurstPreviewTone {
             xs.append(x); ys.append(max(y, ys.last ?? 0))
         }
         guard xs.count >= 3 else { return nil }
-        input = xs; output = ys
+        input = xs; output = ys; flatGain = nil
     }
 
     public func luminance(_ value: Double) -> Double {
         guard value.isFinite, value > 0 else { return 0 }
+        if let flatGain { return min(value * flatGain, 1) }
         let last = input.count - 1
         let mapped: Double
         if value <= input[0] {

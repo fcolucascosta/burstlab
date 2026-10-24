@@ -78,6 +78,14 @@ final class BurstPreviewToneTests: XCTestCase {
             reference: BurstPreviewReference(luminances: scene, width: 24, height: 18)))
     }
 
+    func testUniformBlackPanelUsesPreviewBrightnessWithoutInventingContrast() throws {
+        let curve = try map([Double](repeating: 0.08, count: 432), [Double](repeating: 0.008, count: 432))
+        XCTAssertFalse(curve.usesContrastCurve)
+        XCTAssertLessThan(curve.luminance(0.08), 0.009)
+        XCTAssertEqual(curve.luminance(0), 0)
+        XCTAssertGreaterThan(curve.luminance(0.081), curve.luminance(0.08))
+    }
+
     func testQuantilePlateausDoNotDivideByZero() throws {
         let values = (0..<432).map { i in Double(i / 80 + 1) * 0.08 }
         let curve = try map(values, values.map { $0 * 0.7 })
