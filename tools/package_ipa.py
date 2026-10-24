@@ -101,7 +101,7 @@ def package(app, output=None):
         "ipa_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "installation": "Must be signed locally before installation on iPhone",
         "scope": (
-            "iPhone only. Single JPEG reference and RAW probe; quality-biased Photo selects 12/16/20 frames "
+            "iPhone only. RAW probe; quality-biased Photo selects 12/16/20 frames "
             "from the first RAW shadow signal/noise model, with a retained-payload cap. Tripod modes use 16 frames. "
             "Photo refines local even-pixel translations on green-quad guides and applies a residual-noise-aware "
             "spectral finish after reference-anchored frequency merge. Demosaic, DNG-derived color "
@@ -111,10 +111,12 @@ def package(app, output=None):
             "duration (up to 0.5 s/frame) for lower ISO with robust fusion; Long uses equal-weight accumulation "
             "for motion trails. Night detects bright RAW highlights and can interleave 12 long/4 short frames, "
             "normalizing measured exposures into wide RAW radiance before local highlight compression. "
-            "Bracket motion recovery is experimental. Preview luminance guides rendering before the final gamut fit. "
+            "Bracket motion recovery is experimental. Photo uses guided spatial preview intent in scene-linear light "
+            "when a matching proxy is available, retaining global rendering as fallback. Preview tone precedes the final gamut fit. "
             "Touch sets focus/exposure points. An on-demand CIRAWFilter comparison renders a saved single DNG "
             "at half dimensions, recording the decoder available on the OS; it does not replace burst processing. "
-            "Diagnostics are one-shot, replace the previous export, are limited to 512 MiB and expire on app use after 24 hours. "
+            "RAW diagnostics are one-shot, replace the previous export, are limited to 512 MiB and expire on app use after 24 hours. "
+            "One capture receipt and tiny preview, up to 64 KiB total, replace themselves and share the expiration/cleanup policy. "
             "Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),
