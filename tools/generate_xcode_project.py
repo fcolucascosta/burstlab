@@ -70,10 +70,13 @@ def generate():
         "PBXFrameworksBuildPhase",
         "buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
     )
+    assets = obj("assets", "PBXFileReference",
+                 f"lastKnownFileType = folder.assetcatalog; path = {q('Apple/Assets.xcassets')}; sourceTree = SOURCE_ROOT;")
+    asset_build = obj("assetbuild", "PBXBuildFile", f"fileRef = {assets};")
     resources_phase = obj(
         TARGET + "resources",
         "PBXResourcesBuildPhase",
-        "buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
+        f"buildActionMask = 2147483647; files = {array([asset_build])}; runOnlyForDeploymentPostprocessing = 0;",
     )
 
     configs = []
@@ -84,6 +87,7 @@ def generate():
             "PRODUCT_BUNDLE_IDENTIFIER": "dev.lucas.burstlab.ios",
             "INFOPLIST_FILE": "Apple/Info-iOS.plist",
             "GENERATE_INFOPLIST_FILE": "NO",
+            "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "CODE_SIGN_STYLE": "Automatic",
             "SWIFT_VERSION": "5.0",
             "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
@@ -129,7 +133,7 @@ def generate():
     (ROOT / "Apple" / "Info-iOS.plist").write_bytes(plistlib.dumps(info))
 
     product_group = obj("products", "PBXGroup", f"children = {array([product])}; name = Products; sourceTree = {q('<group>')};")
-    group = obj("root", "PBXGroup", f"children = {array(list(references.values()) + [product_group])}; sourceTree = {q('<group>')};")
+    group = obj("root", "PBXGroup", f"children = {array(list(references.values()) + [assets, product_group])}; sourceTree = {q('<group>')};")
     project_configs = [
         obj("project" + name, "XCBuildConfiguration", f"buildSettings = {{ CLANG_ENABLE_MODULES = YES; }}; name = {name};")
         for name in ["Debug", "Release"]
