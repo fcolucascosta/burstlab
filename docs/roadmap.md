@@ -44,7 +44,7 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 ## F4 - Modos
 
 - [x] Auditoria0.7.0 identificou duplicatas RAW em Noite e implementou cadencia/verificacao por pixels e timestamps.
-- [ ] Confirmar16RAWs distintos e espacamento temporal no SE antes de tratar soma EXIF como exposicoes independentes.
+- [x] Primeiro readback0.7.0 confirmou16SHA256 distintos,0rejeicoes e timestamps espacados>=0,506s em Noite0,5s/ISO160. Confirmacao limitada a este ensaio; SNR e generalizacao pendentes.
 
 - [x] Noite em tripe:16frames, obturador ate0,5s, troca ISO por tempo ao mesmo produto solicitado e fusao robusta (0.4.0). Validacao fisica pendente.
 - [x] Longa em tripe:16frames, acumulacao alinhada com pesos iguais normalizada, para rastros (0.4.0). Validacao fisica pendente.
