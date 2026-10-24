@@ -66,7 +66,7 @@ public struct BurstConfig: Equatable, Sendable {
     public static func defaults(for mode: CaptureMode) -> BurstConfig {
         switch mode {
         case .photo:
-            return BurstConfig(mode: .photo, frameCount: 8, underExposureEV: -0.5)
+            return BurstConfig(mode: .photo, frameCount: 12, underExposureEV: -0.5)
         case .night:
             return BurstConfig(mode: .night, frameCount: 16, underExposureEV: -0.5)
         case .longExposure:

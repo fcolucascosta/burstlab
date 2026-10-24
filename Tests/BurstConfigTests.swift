@@ -51,7 +51,7 @@ final class BurstConfigTests: XCTestCase {
     }
 
     func testModeDefaults() {
-        XCTAssertEqual(BurstConfig.defaults(for: .photo), BurstConfig(mode: .photo, frameCount: 8, underExposureEV: -0.5))
+        XCTAssertEqual(BurstConfig.defaults(for: .photo), BurstConfig(mode: .photo, frameCount: 12, underExposureEV: -0.5))
         XCTAssertEqual(BurstConfig.defaults(for: .night), BurstConfig(mode: .night, frameCount: 16, underExposureEV: -0.5))
         XCTAssertEqual(BurstConfig.defaults(for: .longExposure), BurstConfig(mode: .longExposure, frameCount: 16, underExposureEV: 0))
         XCTAssertTrue(BurstConfig.defaults(for: .photo).usesRobustMerge)

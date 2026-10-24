@@ -10,13 +10,13 @@ final class BurstCapturePlanTests: XCTestCase {
 
     func testNightTradesISOForShutterWithoutChangingRequestedExposureProduct() throws {
         let photo = try plan(.photo), night = try plan(.night)
-        XCTAssertEqual(photo.config.frameCount, 8)
+        XCTAssertEqual(photo.config.frameCount, 12)
         XCTAssertEqual(night.config.frameCount, 16)
         XCTAssertEqual(night.duration, 0.5)
         XCTAssertLessThan(night.iso, 32)
         XCTAssertEqual(night.duration * night.iso, photo.duration * photo.iso, accuracy: 1e-10)
         XCTAssertEqual(night.integrationSeconds, 8)
-        XCTAssertGreaterThan(night.integrationSeconds / photo.integrationSeconds, 40)
+        XCTAssertGreaterThan(night.integrationSeconds / photo.integrationSeconds, 25)
         XCTAssertTrue(night.config.usesRobustMerge)
     }
 

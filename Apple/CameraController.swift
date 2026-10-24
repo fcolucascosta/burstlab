@@ -96,6 +96,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
     private var burstNoiseProfile: [Double]?
+    private var burstFrameBudget: [String: Double] = [:]
     private var burstAsShotNeutral: [Double]?
     private var burstRecordDiagnostics = false
     private var burstReferenceDNG: Data?
@@ -559,6 +560,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstReadinessPolls = 0
             self.burstAsShotNeutral = nil
             self.burstNoiseProfile = nil
+            self.burstFrameBudget = [:]
             self.burstRecordDiagnostics = recordDiagnostics
             self.burstReferenceDNG = nil
             self.burstColorMatrix1 = nil
@@ -618,7 +620,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             return age >= 0 && age <= 0.75 && $0.timestamp >= focusRequestedAt ? $0 : nil
         }
         burstPlan = plan
-        sessionQueue.asyncAfter(deadline: .now() + plan.timeoutSeconds) {
+        let timeout = burstConfig.mode == .photo ? max(plan.timeoutSeconds, 20 * (plan.duration + 2) + 5) : plan.timeoutSeconds
+        sessionQueue.asyncAfter(deadline: .now() + timeout) {
             if self.burstActive && self.burstGeneration == generation { self.abortBurst("Tempo limite da captura excedido.") }
         }
         let settleDelay = burstConfig.mode == .photo ? 0.4 : 2.0
@@ -799,6 +802,28 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             return
         }
         burstDuplicateRetries = 0
+        if burstFrames.isEmpty, burstConfig.mode == .photo {
+            let signal = frame.data.withUnsafeBytes { (bytes: UnsafeRawBufferPointer) -> Double in
+                var samples: [Float] = []
+                for y in stride(from: 0, to: frame.height - 1, by: 16) {
+                    for x in stride(from: 0, to: frame.width - 1, by: 16) {
+                        let a = bytes.loadUnaligned(fromByteOffset: y * frame.bytesPerRow + (x + 1) * 2, as: UInt16.self)
+                        let b = bytes.loadUnaligned(fromByteOffset: (y + 1) * frame.bytesPerRow + x * 2, as: UInt16.self)
+                        samples.append(max((Float(a) + Float(b)) * 0.5 - 2112, 0))
+                    }
+                }
+                samples.sort()
+                return samples.isEmpty ? 0 : Double(samples[samples.count / 4])
+            }
+            let decision = BurstFrameBudget.select(signal: signal, noiseProfile: burstNoiseProfile, bytesPerFrame: frame.data.count)
+            burstConfig.frameCount = decision.frames
+            burstPlan?.config = burstConfig
+            burstRemaining = decision.frames
+            burstFrameBudget = ["selected_frames": Double(decision.frames), "green_shadow_quartile_DN": decision.signal,
+                                "single_frame_sigma_DN": decision.sigma, "used_noise_model": decision.usedNoiseModel ? 1 : 0,
+                                "ideal_independent_sample_snr_target": 25, "raw_payload_bytes": Double(frame.data.count * decision.frames)]
+            burstLog.notice("adaptive photo frames=\(decision.frames, privacy: .public) shadow=\(decision.signal, privacy: .public) sigma=\(decision.sigma, privacy: .public)")
+        }
         if burstFrames.isEmpty, burstConfig.mode == .night,
            BurstHDR.highlightFraction(frame) >= 0.0005 {
             burstPlan?.bracketsHighlights = true
@@ -895,6 +920,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let exposureReadings = burstExposureReadings
         let frameHashes = burstFreshness.hashes
         let duplicateRejections = burstFreshness.rejectedCount
+        let frameBudget = burstFrameBudget
         let highlightFrames = plan?.shortIndices ?? []
         let exposureProducts: [Double]? = exposureReadings.allSatisfy({ $0["duration_seconds"] != nil && $0["iso"] != nil })
             ? exposureReadings.map { ($0["duration_seconds"] ?? 0) * ($0["iso"] ?? 0) } : nil
@@ -943,7 +969,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                                                               rotation: rotationAngle, neutral: asShotNeutral,
                                                               transform: colorTransform, config: config, plan: plan,
                                                               exposureReadings: exposureReadings, preview: preview,
-                                                              frameHashes: frameHashes, duplicateRejections: duplicateRejections)
+                                                              frameHashes: frameHashes, duplicateRejections: duplicateRejections,
+                                                              frameBudget: frameBudget)
                     diagnosticDirectory = directory
                     DispatchQueue.main.async {
                         self.diagnosticNote = "Um ensaio guardado por ate 24 horas. A proxima captura normal nao guarda RAWs."
@@ -962,7 +989,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     noiseProfile: noiseProfile,
                     usesRobustMerge: config.usesRobustMerge,
                     highlightFrames: highlightFrames, exposureProducts: exposureProducts,
-                    previewReference: preview?.reference
+                    previewReference: preview?.reference,
+                    refinesPhotoDetail: config.mode == .photo
                 )
                 if let directory = diagnosticDirectory {
                     do {

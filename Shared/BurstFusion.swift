@@ -36,6 +36,8 @@ public enum BurstFusion {
         var alternateImag = [Float](repeating: 0, count: 256)
         var sumReal = [Float](repeating: 0, count: 256)
         var sumImag = [Float](repeating: 0, count: 256)
+        var referenceWeights = [Float](repeating: 1, count: 256)
+        var alternateSquares = [Float](repeating: 0, count: 256)
 
         init() throws {
             guard let setup = vDSP_create_fftsetup(4, FFTRadix(kFFTRadix2)) else {
@@ -56,7 +58,7 @@ public enum BurstFusion {
         }
 
         func begin() {
-            for i in 0..<256 { imag[i] = 0 }
+            for i in 0..<256 { imag[i] = 0; referenceWeights[i] = 1; alternateSquares[i] = 0 }
             transform(&real, &imag, inverse: false)
             for i in 0..<256 { sumReal[i] = real[i]; sumImag[i] = imag[i] }
         }
@@ -76,12 +78,26 @@ public enum BurstFusion {
                 let noiseDistance = debiasNoise ? max(variance, 0) * 512 : 0
                 let distance = max(dr * dr + di * di - noiseDistance, 0)
                 let referenceWeight = distance / (distance + noisePower)
+                referenceWeights[i] += referenceWeight
+                alternateSquares[i] += (1 - referenceWeight) * (1 - referenceWeight)
                 sumReal[i] += alternateReal[i] + referenceWeight * dr
                 sumImag[i] += alternateImag[i] + referenceWeight * di
             }
         }
 
-        func finish(frameCount: Int) {
+        func finish(frameCount: Int, variance: Float = 0, spatialFactor: Float = 0) {
+            if spatialFactor > 0 {
+                let n = Float(frameCount)
+                // The anchor is reused by every rejected alternate. Assuming
+                // variance/N here would underestimate noise at motion/edges.
+                for i in 1..<256 { // Preserve DC exactly, including black pedestal.
+                    let r = sumReal[i] / n, im = sumImag[i] / n
+                    let power = r * r + im * im
+                    let residual = 256 * variance * (referenceWeights[i] * referenceWeights[i] + alternateSquares[i]) / (n * n)
+                    let gain = power / max(power + spatialFactor * residual, 1e-12)
+                    sumReal[i] *= gain; sumImag[i] *= gain
+                }
+            }
             transform(&sumReal, &sumImag, inverse: true)
             let scale = 1 / (Float(frameCount) * 256)
             for i in 0..<256 { sumReal[i] *= scale }
@@ -90,9 +106,9 @@ public enum BurstFusion {
 
     /// Small deterministic entry point for testing the actual production operator.
     public static func mergePatch(reference: [Float], alternates: [[Float]], variance: Float,
-                                  debiasNoise: Bool = true) throws -> [Float] {
+                                  debiasNoise: Bool = true, spatialFactor: Float = 0) throws -> [Float] {
         guard reference.count == 256, reference.allSatisfy({ $0.isFinite }),
-              variance.isFinite, variance >= 0,
+              variance.isFinite, variance >= 0, spatialFactor.isFinite, spatialFactor >= 0,
               alternates.allSatisfy({ $0.count == 256 && $0.allSatisfy({ $0.isFinite }) }) else {
             throw Failure.invalidFrames
         }
@@ -100,7 +116,7 @@ public enum BurstFusion {
         work.real = reference
         work.begin()
         for alternate in alternates { work.alternateReal = alternate; work.add(variance: variance, debiasNoise: debiasNoise) }
-        work.finish(frameCount: alternates.count + 1)
+        work.finish(frameCount: alternates.count + 1, variance: variance, spatialFactor: spatialFactor)
         return work.sumReal
     }
 
@@ -122,9 +138,13 @@ public enum BurstFusion {
 
     public static func fill(frames: [BurstRawFrame], offsets: [BurstOffset],
                             output: UnsafeMutableBufferPointer<UInt16>,
-                            noiseProfile: [Double]? = nil) throws {
+                            noiseProfile: [Double]? = nil,
+                            localFields: [BurstLocalAlignment.Field]? = nil, spatialFactor: Float = 0) throws {
         let reference = try validate(frames: frames, offsets: offsets, outputCount: output.count)
-        try fillValidated(frames: frames, offsets: offsets, reference: reference, output: output, noiseProfile: noiseProfile)
+        guard spatialFactor.isFinite, spatialFactor >= 0,
+              localFields == nil || localFields?.count == frames.count else { throw Failure.invalidFrames }
+        try fillValidated(frames: frames, offsets: offsets, reference: reference, output: output,
+                          noiseProfile: noiseProfile, localFields: localFields, spatialFactor: spatialFactor)
     }
 
     private static func validate(frames: [BurstRawFrame], offsets: [BurstOffset], outputCount: Int) throws -> BurstRawFrame {
@@ -168,7 +188,8 @@ public enum BurstFusion {
     }
 
     private static func fillValidated(frames: [BurstRawFrame], offsets: [BurstOffset], reference: BurstRawFrame,
-                                      output: UnsafeMutableBufferPointer<UInt16>, noiseProfile: [Double]?) throws {
+                                      output: UnsafeMutableBufferPointer<UInt16>, noiseProfile: [Double]?,
+                                      localFields: [BurstLocalAlignment.Field]?, spatialFactor: Float) throws {
         let width = reference.width, height = reference.height
         let pw = width / 2, ph = height / 2
         let work = try Workspace()
@@ -181,8 +202,9 @@ public enum BurstFusion {
             return values
         }
         withBuffers(frames) { buffers in
-            @inline(__always) func sample(_ frame: Int, x: Int, y: Int) -> Float {
-                let sx = x + offsets[frame].dx, sy = y + offsets[frame].dy
+            @inline(__always) func sample(_ frame: Int, x: Int, y: Int, local: BurstOffset? = nil) -> Float {
+                let offset = local ?? offsets[frame]
+                let sx = x + offset.dx, sy = y + offset.dy
                 if sx < 0 || sy < 0 || sx >= width || sy >= height {
                     return Float(buffers[0].loadUnaligned(fromByteOffset: y * frames[0].bytesPerRow + x * 2, as: UInt16.self))
                 }
@@ -226,16 +248,17 @@ public enum BurstFusion {
                         } else { variance = fallbackVariance }
                         work.begin()
                         for frame in 1..<frames.count {
+                            let local = localFields?[frame].offset(x: tx * 2 + 16, y: ty * 2 + 16)
                             for y in 0..<16 {
                                 let sy = mirror(ty + y, count: ph) * 2 + py
                                 for x in 0..<16 {
                                     let sx = mirror(tx + x, count: pw) * 2 + px
-                                    work.alternateReal[y * 16 + x] = sample(frame, x: sx, y: sy)
+                                    work.alternateReal[y * 16 + x] = sample(frame, x: sx, y: sy, local: local)
                                 }
                             }
                             work.add(variance: variance)
                         }
-                        work.finish(frameCount: frames.count)
+                        work.finish(frameCount: frames.count, variance: variance, spatialFactor: spatialFactor)
                         for y in 0..<16 where ty + y >= 0 && ty + y < ph {
                             for x in 0..<16 where tx + x >= 0 && tx + x < pw {
                                 let index = (ty + y) * pw + tx + x

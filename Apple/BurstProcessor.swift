@@ -52,7 +52,8 @@ enum BurstProcessor {
         noiseProfile: [Double]? = nil,
         usesRobustMerge: Bool = true,
         highlightFrames: [Int] = [], exposureProducts: [Double]? = nil,
-        previewReference: BurstPreviewReference? = nil
+        previewReference: BurstPreviewReference? = nil,
+        refinesPhotoDetail: Bool = false
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -84,6 +85,9 @@ enum BurstProcessor {
             return Shift(dx: BurstAlignment.bestShift(referenceProfiles.columns, current.columns, maxShift: 64),
                          dy: BurstAlignment.bestShift(referenceProfiles.rows, current.rows, maxShift: 64))
         }
+        let localFields = refinesPhotoDetail && hdrRatio == nil && usesRobustMerge
+            ? BurstLocalAlignment.fields(frames: frames, offsets: shifts, noiseProfile: noiseProfile) : nil
+        let spatialFactor: Float = refinesPhotoDetail && usesRobustMerge ? 1 : 0
         let alignedAt = CFAbsoluteTimeGetCurrent()
         // Keep recovered highlight radiance above sensor white until tone mapping.
         let merged = UnsafeMutablePointer<UInt32>.allocate(capacity: pixelCount)
@@ -95,7 +99,8 @@ enum BurstProcessor {
         func fuse(_ group: [BurstFrame], offsets: [Shift]) throws -> [UInt16] {
             var raw = [UInt16](repeating: 0, count: pixelCount)
             try raw.withUnsafeMutableBufferPointer {
-                if usesRobustMerge { try BurstFusion.fill(frames: group, offsets: offsets, output: $0, noiseProfile: noiseProfile) }
+                if usesRobustMerge { try BurstFusion.fill(frames: group, offsets: offsets, output: $0,
+                    noiseProfile: noiseProfile, localFields: hdrRatio == nil ? localFields : nil, spatialFactor: spatialFactor) }
                 else { try BurstFusion.fillAverage(frames: group, offsets: offsets, output: $0) }
             }
             return raw
@@ -384,6 +389,9 @@ enum BurstProcessor {
                            "chroma_filter": denoisedAt - renderedAt, "perceptual_color": coloredAt - denoisedAt,
                            "rotation_jpeg": finishedAt - coloredAt],
             exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
+                            "local_alignment_refined_tiles": Double(localFields?.reduce(0) { $0 + $1.refinedTiles } ?? 0),
+                            "local_alignment_total_tiles": Double(localFields?.dropFirst().reduce(0) { $0 + $1.offsets.count } ?? 0),
+                            "residual_spatial_factor": Double(spatialFactor),
                             "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
                             "adjustment_over_luminance_median_ev": meter.adjustmentEV,
                             "preview_available": previewReference == nil ? 0 : 1,

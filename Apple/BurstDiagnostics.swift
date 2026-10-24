@@ -20,7 +20,7 @@ enum BurstDiagnostics {
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
                      neutral: [Double]?, transform: [Double]?, config: BurstConfig,
                      plan: BurstCapturePlan?, exposureReadings: [[String: Double]], preview: BurstPreviewSample?,
-                     frameHashes: [String], duplicateRejections: Int) throws -> URL {
+                     frameHashes: [String], duplicateRejections: Int, frameBudget: [String: Double]) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,
                                                    in: .userDomainMask, appropriateFor: nil, create: true)
         let storage = BurstDiagnosticStorage(documents: documents)
@@ -42,7 +42,7 @@ enum BurstDiagnostics {
             try referenceDNG.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic)
         }
         var manifest: [String: Any] = [
-            "schema_version": 4,
+            "schema_version": 5,
             "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             "created_at": ISO8601DateFormatter().string(from: Date()),
             "pixel_format": "rgg4", "storage": "little-endian UInt16, row stride included",
@@ -54,6 +54,7 @@ enum BurstDiagnostics {
             "merge": config.usesRobustMerge ? "reference_anchored_spectral" : "aligned_equal_weight_average",
             "requested_frame_count": config.frameCount,
             "actual_exposures": exposureReadings,
+            "adaptive_frame_budget": frameBudget,
             "unique_pixel_frames": Set(frameHashes).count,
             "repeated_or_stale_raw_rejections": duplicateRejections,
             "limitations": "Fixed sensor levels are historical assumptions; no measured quality claim."

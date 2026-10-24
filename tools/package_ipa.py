@@ -101,10 +101,12 @@ def package(app, output=None):
         "ipa_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         "installation": "Must be signed locally before installation on iPhone",
         "scope": (
-            "iPhone only. Single JPEG reference and RAW probe; experimental 8-frame Photo and 16-frame tripod modes "
-            "with even-pixel translation alignment, reference-anchored frequency merge, demosaic, DNG-derived color "
+            "iPhone only. Single JPEG reference and RAW probe; quality-biased Photo selects 12/16/20 frames "
+            "from the first RAW shadow signal/noise model, with a retained-payload cap. Tripod modes use 16 frames. "
+            "Photo refines local even-pixel translations on green-quad guides and applies a residual-noise-aware "
+            "spectral finish after reference-anchored frequency merge. Demosaic, DNG-derived color "
             "transform with fallback white balance, bounded local SDR tone mapping and chroma denoise. "
-            "Frequency-based motion rejection is experimental; local/subpixel alignment, HDR gain maps, "
+            "Frequency-based motion rejection and local registration are experimental; subpixel alignment, super-resolution, HDR gain maps, "
             "automatic tripod detection and handheld night are not implemented. Explicit Night trades shutter "
             "duration (up to 0.5 s/frame) for lower ISO with robust fusion; Long uses equal-weight accumulation "
             "for motion trails. Night detects bright RAW highlights and can interleave 12 long/4 short frames, "
@@ -112,6 +114,7 @@ def package(app, output=None):
             "Bracket motion recovery is experimental. Preview luminance guides rendering before the final gamut fit. "
             "Touch sets focus/exposure points. An on-demand CIRAWFilter comparison renders a saved single DNG "
             "at half dimensions, recording the decoder available on the OS; it does not replace burst processing. "
+            "Diagnostics are one-shot, replace the previous export, are limited to 512 MiB and expire on app use after 24 hours. "
             "Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),

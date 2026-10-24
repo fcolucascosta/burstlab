@@ -2,6 +2,38 @@ import XCTest
 @testable import BurstCore
 #if canImport(Accelerate)
 final class BurstFusionTests: XCTestCase {
+    func testResidualNoiseFinishPreservesDCAndStrongFineTexture() throws {
+        let constant = [Float](repeating: 2400, count: 256)
+        let flat = try BurstFusion.mergePatch(reference: constant, alternates: [constant], variance: 144, spatialFactor: 1)
+        for value in flat { XCTAssertEqual(value, 2400, accuracy: 0.01) }
+        let texture = (0..<256).map { i in Float(2400 + ((i % 16) % 2 == 0 ? 200 : -200)) }
+        let finished = try BurstFusion.mergePatch(reference: texture, alternates: [texture], variance: 144, spatialFactor: 1)
+        for i in texture.indices { XCTAssertEqual(finished[i], texture[i], accuracy: 1) }
+    }
+
+    func testResidualNoiseFinishReducesStaticNoiseBeyondTemporalMerge() throws {
+        var state: UInt64 = 20261024
+        var frames: [[Float]] = []
+        for _ in 0..<12 {
+            frames.append((0..<256).map { _ in
+                state = state &* 6364136223846793005 &+ 1442695040888963407
+                return 2400 + Float((state >> 32) & 65535) / 65535 * 80 - 40
+            })
+        }
+        let temporal = try BurstFusion.mergePatch(reference: frames[0], alternates: Array(frames.dropFirst()), variance: 533.33)
+        let finished = try BurstFusion.mergePatch(reference: frames[0], alternates: Array(frames.dropFirst()), variance: 533.33, spatialFactor: 1)
+        func mse(_ values: [Float]) -> Float { values.reduce(0) { $0 + ($1 - 2400) * ($1 - 2400) } / 256 }
+        XCTAssertLessThan(mse(finished), mse(temporal) * 0.7)
+        XCTAssertEqual(finished.reduce(0, +) / 256, temporal.reduce(0, +) / 256, accuracy: 0.01)
+    }
+
+    func testResidualFinishDoesNotTurnRejectedMotionIntoGhosts() throws {
+        let reference = [Float](repeating: 2400, count: 256), alternate = [Float](repeating: 10000, count: 256)
+        let result = try BurstFusion.mergePatch(reference: reference, alternates: [alternate, alternate, alternate],
+                                               variance: 64, spatialFactor: 1)
+        for value in result { XCTAssertEqual(value, 2400, accuracy: 1) }
+    }
+
     func testFFTTwoDimensionalRoundTripPreservesEverySample() throws {
         let input: [Float] = (0..<256).map { Float(($0 * 37) % 71) + 2000 }
         let result = try BurstFusion.mergePatch(reference: input, alternates: [], variance: 64)

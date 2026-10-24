@@ -3,7 +3,7 @@ import Foundation
 /// Photo preserves the preview shutter/ISO policy. Explicit tripod modes trade
 /// a longer shutter for lower ISO at the same requested exposure product.
 public struct BurstCapturePlan {
-    public let config: BurstConfig
+    public var config: BurstConfig
     public let duration: Double
     public let iso: Double
     public let minDuration: Double
