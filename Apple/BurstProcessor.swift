@@ -224,8 +224,8 @@ enum BurstProcessor {
         let previewTone = previewReference.flatMap { preview -> BurstPreviewTone? in
             let rendered = thumbnail.indices.map { i -> Double in
                 let y = thumbnail[i] * scaleD
-                return BurstToneMap.render(red: y, green: y, blue: y,
-                    gain: tone.gain(x: Double(i % toneWidth), y: Double(i / toneWidth))).0
+                return BurstToneMap.renderedLuminance(y,
+                    gain: tone.gain(x: Double(i % toneWidth), y: Double(i / toneWidth)))
             }
             return BurstPreviewTone(rendered: rendered, width: toneWidth, height: toneHeight, reference: preview)
         }
@@ -305,9 +305,8 @@ enum BurstProcessor {
                 let linear = linearRGB(red, green, blue)
                 let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
                                      y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
-                let base = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
-                                                   blue: linear.2 * scaleD, gain: gain)
-                let rendered = previewTone?.apply(red: base.0, green: base.1, blue: base.2) ?? base
+                let rendered = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
+                                                   blue: linear.2 * scaleD, gain: gain, previewTone: previewTone)
                 rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
                 rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
                 rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]

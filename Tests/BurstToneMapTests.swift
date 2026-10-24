@@ -68,4 +68,22 @@ final class BurstToneMapTests: XCTestCase {
         let dimmed = BurstToneMap.render(red: 0.18, green: 0.18, blue: 0.18, gain: 0.5)
         XCTAssertEqual(dimmed.0, 0.09, accuracy: 1e-12)
     }
+
+    func testBrightOrangeKeepsColorWhenPreviewLowersItsOutputLuminance() throws {
+        let levels = (0..<432).map { 0.005 + Double($0) / 431.0 * 0.94 }
+        let reference = BurstPreviewReference(luminances: levels.map { $0 * 0.3 }, width: 24, height: 18)
+        let curve = try XCTUnwrap(BurstPreviewTone(rendered: levels, width: 24, height: 18, reference: reference))
+        let raw = (2.6, 1.0, 0.1)
+        let intermediate = BurstToneMap.render(red: raw.0, green: raw.1, blue: raw.2, gain: 1)
+        let old = curve.apply(red: intermediate.0, green: intermediate.1, blue: intermediate.2)
+        let corrected = BurstToneMap.render(red: raw.0, green: raw.1, blue: raw.2, gain: 1, previewTone: curve)
+        XCTAssertLessThan(old.0 / old.1, 2)
+        XCTAssertEqual(corrected.0 / corrected.1, raw.0 / raw.1, accuracy: 1e-10)
+        XCTAssertEqual(corrected.2 / corrected.1, raw.2 / raw.1, accuracy: 1e-10)
+        func y(_ rgb: (Double, Double, Double)) -> Double { 0.2126 * rgb.0 + 0.7152 * rgb.1 + 0.0722 * rgb.2 }
+        XCTAssertEqual(y(corrected), y(old), accuracy: 1e-12)
+        // Recovering color must not flatten neighboring radiance values.
+        let brighter = BurstToneMap.render(red: raw.0 * 1.01, green: raw.1 * 1.01, blue: raw.2 * 1.01, gain: 1, previewTone: curve)
+        XCTAssertGreaterThan(y(brighter), y(corrected))
+    }
 }

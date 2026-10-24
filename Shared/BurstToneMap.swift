@@ -53,16 +53,26 @@ public struct BurstToneMap {
         return exp(top * (1 - fy) + bottom * fy)
     }
 
-    public static func render(red: Double, green: Double, blue: Double, gain: Double) -> (Double, Double, Double) {
+    public static func render(red: Double, green: Double, blue: Double, gain: Double,
+                              previewTone: BurstPreviewTone? = nil) -> (Double, Double, Double) {
         guard red.isFinite, green.isFinite, blue.isFinite, gain.isFinite else { return (0, 0, 0) }
         let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
         guard luminance > 1e-5 else { return (0, 0, 0) }
+        let base = renderedLuminance(luminance, gain: gain)
+        let output = previewTone?.luminance(base) ?? base
+        // Retain scene-linear chromaticity until the final output luminance is
+        // known. An earlier gamut fit near white irreversibly desaturates color.
+        return fitGamut(red: red, green: green, blue: blue, luminance: luminance, output: output)
+    }
+
+    public static func renderedLuminance(_ luminance: Double, gain: Double) -> Double {
+        guard luminance.isFinite, gain.isFinite, luminance > 1e-5 else { return 0 }
         let lifted = luminance * min(max(gain, 1.0 / 16), 2)
         // A rational shoulder retains highlight steps much longer than the
         // previous exponential shoulder when encoding to an 8-bit JPEG.
         let excess = max(lifted - 0.65, 0)
         let output = lifted <= 0.65 ? lifted : 0.65 + 0.35 * excess / (excess + 0.35)
-        return fitGamut(red: red, green: green, blue: blue, luminance: luminance, output: output)
+        return output
     }
 
     static func fitGamut(red: Double, green: Double, blue: Double, luminance: Double, output: Double) -> (Double, Double, Double) {
