@@ -28,6 +28,7 @@ SOURCES = [
     "Shared/BurstLocalAlignment.swift",
     "Shared/BurstFrameBudget.swift",
     "Shared/BurstPreviewSpatialTone.swift",
+    "Shared/BurstRAWDecoderSelection.swift",
 ]
 
 

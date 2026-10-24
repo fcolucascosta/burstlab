@@ -38,9 +38,8 @@ enum BurstAppleRAWReference {
             guard let raw = CIRAWFilter(imageURL: url) else { throw Failure.unsupportedDNG }
             let initial = raw.decoderVersion.rawValue
             let versions = raw.supportedDecoderVersions
-            // Apple documents this list in reverse chronological order. Using
-            // a returned value also works with a newer OS than the build SDK.
-            if let newest = versions.first { raw.decoderVersion = newest }
+            let chosen = BurstRAWDecoderSelection.newest(supported: versions.map { $0.rawValue }, current: initial)
+            if let newest = versions.first(where: { $0.rawValue == chosen }) { raw.decoderVersion = newest }
             raw.scaleFactor = 0.5
             raw.extendedDynamicRangeAmount = 0
             guard let output = raw.outputImage else { throw Failure.renderFailed }
@@ -55,6 +54,7 @@ enum BurstAppleRAWReference {
                 "schema_version": 1, "source": "reference.dng", "source_frame_count": 1,
                 "decoder_initial": initial, "supported_decoders": versions.map { $0.rawValue },
                 "decoder_effective": raw.decoderVersion.rawValue,
+                "decoder_selection": "highest numeric supported, prefer DNG, never downgrade default",
                 "scale_factor": raw.scaleFactor, "output_width": Int(output.extent.width),
                 "output_height": Int(output.extent.height), "output": "apple-raw-reference.jpg",
                 "exposure": raw.exposure, "baseline_exposure": raw.baselineExposure,
