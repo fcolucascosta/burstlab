@@ -47,6 +47,15 @@ jobs:
         run: xcodebuild -project BurstLab.xcodeproj -scheme BurstLab-iOS -sdk iphonesimulator -derivedDataPath build/ios-simulator -configuration Debug build CODE_SIGNING_ALLOWED=NO
       - name: Build unsigned iPhone IPA
         run: bash tools/build_unsigned_ipa.sh
+      - name: Capture SE 2022 interface for visual review
+        run: python3 tools/capture_simulator_ui.py
+      - name: Upload interface review
+        uses: actions/upload-artifact@v7
+        with:
+          name: BurstLab-SE-interface
+          path: build/ui-review/iphone-se-2022.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload IPA for local signing on Windows
         uses: actions/upload-artifact@v7
         with:

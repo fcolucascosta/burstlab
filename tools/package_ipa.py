@@ -109,7 +109,10 @@ def package(app, output=None):
             "duration (up to 0.5 s/frame) for lower ISO with robust fusion; Long uses equal-weight accumulation "
             "for motion trails. Night detects bright RAW highlights and can interleave 12 long/4 short frames, "
             "normalizing measured exposures into wide RAW radiance before local highlight compression. "
-            "Bracket motion recovery is experimental. Image quality, peak "
+            "Bracket motion recovery is experimental. Preview luminance guides rendering before the final gamut fit. "
+            "Touch sets focus/exposure points. An on-demand CIRAWFilter comparison renders a saved single DNG "
+            "at half dimensions, recording the decoder available on the OS; it does not replace burst processing. "
+            "Image quality, peak "
             "memory and latency require measurement on iPhone SE 2022; see docs/roadmap.md."
         ),
     }

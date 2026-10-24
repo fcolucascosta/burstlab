@@ -43,8 +43,9 @@ struct ContentView: View {
             CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport,
                                  fallback: camera.status, diagnosticNote: camera.diagnosticNote,
                                  captureNote: camera.lastCaptureNote,
+                                 appleRawStatus: camera.appleRawStatus, appleRawData: camera.appleRawReferenceData,
                                  recordDiagnostics: $recordDiagnostics, canProbe: !busy,
-                                 onProbe: { camera.probeRawBurst() })
+                                 onProbe: { camera.probeRawBurst() }, onAppleRAW: { camera.compareAppleRAW() })
         }
         .sheet(isPresented: $showPhoto) {
             CapturedPhotoView(data: camera.lastPhotoData)
@@ -160,6 +161,7 @@ private struct CameraThirdsGrid: View {
 private struct CapturedPhotoView: View {
     @Environment(\.dismiss) private var dismiss
     let data: Data?
+    var title = "Ultima foto"
     var body: some View {
         NavigationStack {
             ZStack {
@@ -168,7 +170,7 @@ private struct CapturedPhotoView: View {
                     Image(uiImage: image).resizable().scaledToFit()
                 }
             }
-            .navigationTitle("Ultima foto").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Fechar") { dismiss() } } }
         }.preferredColorScheme(.dark)
     }
@@ -181,9 +183,13 @@ struct CapabilityReportView: View {
     let fallback: String
     let diagnosticNote: String
     let captureNote: String
+    let appleRawStatus: String
+    let appleRawData: Data?
     @Binding var recordDiagnostics: Bool
     let canProbe: Bool
     let onProbe: () -> Void
+    let onAppleRAW: () -> Void
+    @State private var showAppleRAW = false
 
     private var reportText: String {
         var parts: [String] = []
@@ -206,6 +212,14 @@ struct CapabilityReportView: View {
                     Text("Opcional: guarda cerca de 220 MB em Foto ou 420 MB em Noite/Longa em Arquivos > No Meu iPhone > BurstLab > Ensaios. A foto continua sendo salva na fototeca. Apague os ensaios depois de copiar para o computador.")
                         .font(.caption)
                     Button("Sonda de diagnostico RAW", action: onProbe).disabled(!canProbe)
+                    Divider()
+                    Text("Laboratorio").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Comparar ultimo RAW com processamento Apple", action: onAppleRAW).disabled(!canProbe)
+                    Text("Revela um RAW individual ja guardado, em meia resolucao. A comparacao nao usa o empilhamento nem substitui a foto final.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !appleRawStatus.isEmpty { Text(appleRawStatus).font(.caption) }
+                    if appleRawData != nil { Button("Ver comparacao Apple") { showAppleRAW = true } }
+                    Divider()
                     if !diagnosticNote.isEmpty { Text(diagnosticNote).font(.caption) }
                     if !captureNote.isEmpty { Text(captureNote).font(.caption.monospaced()) }
                     Text("BurstLab \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?")")
@@ -217,6 +231,9 @@ struct CapabilityReportView: View {
                 .padding()
             }
             .navigationTitle("Ajustes")
+            .sheet(isPresented: $showAppleRAW) {
+                CapturedPhotoView(data: appleRawData, title: "Apple · RAW individual")
+            }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

@@ -45,6 +45,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var focusHint = ""
     @Published var lastPhotoThumbnail: UIImage?
     private(set) var lastPhotoData: Data?
+    @Published var appleRawStatus = ""
+    @Published var appleRawReferenceData: Data?
 
     let session = AVCaptureSession()
 
@@ -199,6 +201,40 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         DispatchQueue.main.async {
             self.focusHint = settled ? "Ponto de foco definido" : "Pouca luz para confirmar o foco"
             completion(settled)
+        }
+    }
+
+    func compareAppleRAW() {
+        sessionQueue.async {
+            guard self.configured, !self.burstActive, !self.processingActive,
+                  !self.singleCaptureActive, !self.probeActive else { return }
+            self.processingActive = true
+            DispatchQueue.main.async {
+                self.isCapturingBurst = true
+                self.status = "Preparando comparacao Apple…"
+                self.appleRawStatus = "Revelando um RAW guardado…"
+                self.appleRawReferenceData = nil
+            }
+            self.processingQueue.async {
+                do {
+                    let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                                                appropriateFor: nil, create: false)
+                    let directory = try BurstAppleRAWReference.latestDirectory(in: documents)
+                    let result = try BurstAppleRAWReference.render(directory: directory)
+                    let decoder = result.report["decoder_effective"] as? String ?? "?"
+                    DispatchQueue.main.async {
+                        self.appleRawReferenceData = result.jpeg
+                        self.appleRawStatus = "Comparacao pronta · decoder \(decoder) · RAW individual, meia resolucao."
+                        self.status = "Comparacao pronta"
+                    }
+                } catch {
+                    DispatchQueue.main.async {
+                        self.appleRawStatus = error.localizedDescription
+                        self.status = "Comparacao indisponivel"
+                    }
+                }
+                self.completeBurstProcessing()
+            }
         }
     }
 
