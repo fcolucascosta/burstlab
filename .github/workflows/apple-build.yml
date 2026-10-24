@@ -39,10 +39,23 @@ jobs:
         run: swift test
       - name: IPA packaging tests
         run: python3 -m unittest discover -s tools/tests -v
+      - name: Preview sampler color and orientation
+        run: |
+          swiftc Shared/BurstToneMap.swift Shared/BurstPreviewTone.swift Shared/BurstPreviewSpatialTone.swift Apple/BurstPreviewSampler.swift tools/verify_preview_sampler.swift -o build/verify-preview-sampler
+          build/verify-preview-sampler
       - name: iOS simulator build
         run: xcodebuild -project BurstLab.xcodeproj -scheme BurstLab-iOS -sdk iphonesimulator -derivedDataPath build/ios-simulator -configuration Debug build CODE_SIGNING_ALLOWED=NO
       - name: Build unsigned iPhone IPA
         run: bash tools/build_unsigned_ipa.sh
+      - name: Capture SE 2022 interface for visual review
+        run: python3 tools/capture_simulator_ui.py
+      - name: Upload interface review
+        uses: actions/upload-artifact@v7
+        with:
+          name: BurstLab-SE-interface
+          path: build/ui-review/iphone-se-2022.png
+          if-no-files-found: error
+          retention-days: 7
       - name: Upload IPA for local signing on Windows
         uses: actions/upload-artifact@v7
         with:

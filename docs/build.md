@@ -4,7 +4,7 @@ O MacBook da empresa nao participa do fluxo. O app e compilado em um runner macO
 
 ## Compilar
 
-1. Repositorio: `fcolucascosta/burstlab` (privado, a criar) com este conteudo.
+1. Repositorio: `fcolucascosta/burstlab` com este conteudo.
 2. Execute **Actions -> Apple build -> Run workflow**.
 3. O runner roda os testes Swift (`swift test`), os testes do empacotador, compila para simulador e para iPhone fisico, e publica o artefato **BurstLab-iPhone-unsigned**.
 4. Baixe o artefato e extraia `BurstLab-<versao>-unsigned.ipa` e `BurstLab-<versao>-build.json`. O empacotador nomeia os arquivos pela versao (ex.: `BurstLab-0.1.1-unsigned.ipa`), entao versoes antigas podem ficar juntas em `build/dist` sem se sobrescreverem.
@@ -26,6 +26,8 @@ Assinaturas de desenvolvimento expiram; renove instalando de novo com a mesma Co
 - **iLoader nao lista o iPhone**: verifique o **Apple Mobile Device Service** (`services.msc`), configure inicio automatico e inicie. Reconecte o iPhone desbloqueado e aceite a confianca.
 - **GSA HTTP 503 no Sideloadly**: erro conhecido nesta maquina; use o iLoader 2.3.8, que corrige esse caso.
 
-## Proximo passo pratico
+## Validacao de cada revisao
 
-Criar o repositorio `burstlab` no GitHub, enviar este conteudo, rodar o workflow e instalar o IPA. O primeiro objetivo no aparelho e abrir o relatorio de capacidades (botao de informacao) e copiar o texto: ele responde se o SE 2022 oferece RAW e quais os limites de ISO/exposicao.
+O repositorio e o workflow ja existem. Apos um novo build, confira o commit do run e o SHA-256 do IPA contra o manifest antes de importar no iLoader. O empacotador recusa sobrescrever IPA ou manifest existentes: use uma nova versao ou outro diretorio para um rebuild.
+
+Um build aprovado comprova compilacao e empacotamento; nao comprova qualidade fotografica. No SE, registre versao/commit, cena, ISO/tempo, orientacao, latencia, termica e pico de memoria. Compare burst com frame unico em cena estatica e em movimento. Registre resultado e eventual reversao em `reports/`.

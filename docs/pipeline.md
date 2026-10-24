@@ -22,7 +22,7 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 
 **Limites que mandam no projeto**:
 - Camera unica de 12 MP: sem ultrawide/tele; SR apenas digital via burst.
-- 4 GB de RAM: o pico de memoria deve ficar bem abaixo do limite de Jetsam. Contas medidas: RAW 12 MP em container de 16 bits = 4032 x 3024 x 2 = 24.385.536 bytes (~24,4 MB/frame); 8 frames ~195 MB; 16 frames ~390 MB. Acumulador UInt32 full-res = 48,8 MB; orcamento alvo de trabalho ~150 MB por burst de 8.
+- 4 GB de RAM: o pico de memoria deve ficar bem abaixo do limite de Jetsam. Contas medidas: RAW 12 MP em container de 16 bits = 4032 x 3024 x 2 = 24.385.536 bytes (~24,4 MB/frame); 8 frames ~195 MB; 16 frames ~390 MB. Acumulador UInt32 full-res = 48,8 MB; o alvo original de ~150 MB e incompativel com a retencao atual de 8 RAW. O processador atual usa CPU e varios buffers full-res; tiles/Metal e reducao do pico ainda sao trabalho futuro.
 - Processar por tiles no Metal, alinhar em resolucao reduzida (ex. 1/4) e aplicar warp em tiles full-res.
 - Termica num corpo pequeno: bursts curtos e limites de frames por modo.
 - Exposicao maxima de 0,5 s por frame (medida): Night soma mais frames, nao frames de 1 s.
@@ -62,7 +62,7 @@ Este documento resume o que o Project Indigo faz com base em fontes publicas (o 
 
 ### Ainda em aberto
 
-- Nivel de preto/saturacao, alinhamento de bits e padrao CFA exatos (analise de frame inteiro na 0.1.2).
+- Verificar se os niveis de preto/branco historicos 2112/16383 permanecem validos em diferentes ISO/exposicoes; o processador ainda usa essas constantes.
 - Custo termico de bursts de 16-32 frames.
 - Faixa de ISO/exposicao do formato RAW (a sonda atual reporta a do formato ativo).
 

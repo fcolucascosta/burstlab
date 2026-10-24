@@ -2,12 +2,7 @@ import AVFoundation
 import Foundation
 import UIKit
 
-struct BurstFrame {
-    let width: Int
-    let height: Int
-    let bytesPerRow: Int
-    let data: Data
-}
+typealias BurstFrame = BurstRawFrame
 
 struct BurstProcessResult {
     let jpegData: Data
@@ -21,6 +16,8 @@ struct BurstProcessResult {
     let usedCCM: Bool
     let denoised: Bool
     let elapsedSeconds: Double
+    let stageSeconds: [String: Double]
+    let exposureMeter: [String: Double]
 }
 
 enum BurstProcessor {
@@ -28,10 +25,7 @@ enum BurstProcessor {
     static let whiteLevel: Float = 16383
     static let usefullRange: Float = whiteLevel - blackLevel
 
-    struct Shift {
-        let dx: Int
-        let dy: Int
-    }
+    typealias Shift = BurstOffset
 
     enum BurstError: LocalizedError {
         case noFrames
@@ -54,51 +48,82 @@ enum BurstProcessor {
         underExposureEV: Double,
         rotationAngle: Int = 0,
         asShotNeutral: [Double]? = nil,
-        colorTransform: [Double]? = nil
+        colorTransform: [Double]? = nil,
+        noiseProfile: [Double]? = nil,
+        usesRobustMerge: Bool = true,
+        highlightFrames: [Int] = [], exposureProducts: [Double]? = nil,
+        previewReference: BurstPreviewReference? = nil,
+        refinesPhotoDetail: Bool = false
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
         let height = reference.height
-        guard width > 1, height > 1 else { throw BurstError.invalidDimensions }
+        guard frames.count <= BurstConfig.frameRange.upperBound,
+              BurstRawLayout.isValid(width: width, height: height,
+                                     bytesPerRow: reference.bytesPerRow, byteCount: reference.data.count),
+              frames.allSatisfy({
+                  $0.width == width && $0.height == height &&
+                  BurstRawLayout.isValid(width: $0.width, height: $0.height,
+                                         bytesPerRow: $0.bytesPerRow, byteCount: $0.data.count)
+              }) else { throw BurstError.invalidDimensions }
 
         let started = CFAbsoluteTimeGetCurrent()
         let pixelCount = width * height
-
-        let sums = UnsafeMutablePointer<UInt32>.allocate(capacity: pixelCount)
-        sums.initialize(repeating: 0, count: pixelCount)
-        let counts = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount)
-        counts.initialize(repeating: 0, count: pixelCount)
-
-        var shifts: [Shift] = []
-        shifts.reserveCapacity(frames.count)
-        for (index, frame) in frames.enumerated() {
-            let shift: Shift
-            if index == 0 {
-                shift = Shift(dx: 0, dy: 0)
-            } else {
-                shift = estimateShift(reference: reference, frame: frame)
+        let products = exposureProducts ?? []
+        let hdrRatio: Double?
+        if !highlightFrames.isEmpty {
+            guard usesRobustMerge, products.count == frames.count else {
+                throw BurstHDR.Failure.invalidBracket
             }
-            shifts.append(shift)
-            accumulate(frame: frame, into: sums, counts: counts, width: width, height: height, shift: shift)
+            hdrRatio = try BurstHDR.ratio(products: products, shortIndices: highlightFrames)
+        } else { hdrRatio = nil }
+        let referenceProfiles = profiles(for: reference, signalScale: hdrRatio == nil ? nil : 1)
+        let shifts = frames.enumerated().map { index, frame in
+            guard index > 0, let referenceProfiles else { return Shift(dx: 0, dy: 0) }
+            let scale: Double? = hdrRatio != nil ? (products[0] / products[index]) : nil
+            guard let current = profiles(for: frame, signalScale: scale) else { return Shift(dx: 0, dy: 0) }
+            return Shift(dx: BurstAlignment.bestShift(referenceProfiles.columns, current.columns, maxShift: 64),
+                         dy: BurstAlignment.bestShift(referenceProfiles.rows, current.rows, maxShift: 64))
         }
-
-        let merged = UnsafeMutablePointer<UInt16>.allocate(capacity: pixelCount)
-        for index in 0..<pixelCount {
-            let count = UInt32(counts[index])
-            if count == 0 {
-                merged[index] = UInt16(blackLevel)
-            } else {
-                merged[index] = UInt16(min(65535, (sums[index] + count / 2) / count))
-            }
-        }
-        sums.deinitialize(count: pixelCount)
-        sums.deallocate()
-        counts.deinitialize(count: pixelCount)
-        counts.deallocate()
+        let localFields = refinesPhotoDetail && hdrRatio == nil && usesRobustMerge
+            ? BurstLocalAlignment.fields(frames: frames, offsets: shifts, noiseProfile: noiseProfile) : nil
+        let spatialFactor: Float = refinesPhotoDetail && usesRobustMerge ? 1 : 0
+        let alignedAt = CFAbsoluteTimeGetCurrent()
+        // Keep recovered highlight radiance above sensor white until tone mapping.
+        let merged = UnsafeMutablePointer<UInt32>.allocate(capacity: pixelCount)
+        merged.initialize(repeating: 0, count: pixelCount)
         defer {
             merged.deinitialize(count: pixelCount)
             merged.deallocate()
         }
+        func fuse(_ group: [BurstFrame], offsets: [Shift]) throws -> [UInt16] {
+            var raw = [UInt16](repeating: 0, count: pixelCount)
+            try raw.withUnsafeMutableBufferPointer {
+                if usesRobustMerge { try BurstFusion.fill(frames: group, offsets: offsets, output: $0,
+                    noiseProfile: noiseProfile, localFields: hdrRatio == nil ? localFields : nil, spatialFactor: spatialFactor) }
+                else { try BurstFusion.fillAverage(frames: group, offsets: offsets, output: $0) }
+            }
+            return raw
+        }
+        var hdrStats = BurstHDR.Statistics()
+        if let ratio = hdrRatio {
+            let shortSet = Set(highlightFrames)
+            let longIndices = frames.indices.filter { !shortSet.contains($0) }
+            let long = try fuse(longIndices.map { frames[$0] }, offsets: longIndices.map { shifts[$0] })
+            let base = shifts[highlightFrames[0]]
+            let shortOffsets = highlightFrames.map { Shift(dx: shifts[$0].dx - base.dx, dy: shifts[$0].dy - base.dy) }
+            let short = try fuse(highlightFrames.map { frames[$0] }, offsets: shortOffsets)
+            hdrStats = try long.withUnsafeBufferPointer { l in
+                try short.withUnsafeBufferPointer { s in
+                    try BurstHDR.fill(long: l, short: s, width: width, height: height, shortOffset: base, ratio: ratio,
+                                      noiseProfile: noiseProfile, output: UnsafeMutableBufferPointer(start: merged, count: pixelCount))
+                }
+            }
+        } else {
+            let raw = try fuse(frames, offsets: shifts)
+            for i in 0..<pixelCount { merged[i] = UInt32(raw[i]) }
+        }
+        let fusedAt = CFAbsoluteTimeGetCurrent()
 
         var phaseSum = [Double](repeating: 0, count: 4)
         var phaseCount = [Int](repeating: 0, count: 4)
@@ -144,45 +169,81 @@ enum BurstProcessor {
             }
         }
         let medianNorm = max((medianGreen - Double(blackLevel)) / Double(usefullRange), 0.002)
-        let exposureScale = Float(min(max(0.18 / medianNorm, 0.5), 24.0))
+        let legacyExposureScale = min(max(0.18 / medianNorm, 0.5), 24.0)
 
         var ccm: [Double]? = nil
-        if let transform = colorTransform, transform.count == 9 {
+        if let transform = colorTransform, transform.count == 9, transform.allSatisfy({ $0.isFinite }) {
             ccm = transform
         }
         if ccm == nil {
-            if let neutral = asShotNeutral, neutral.count == 3, neutral[0] > 0, neutral[2] > 0 {
+            if let neutral = asShotNeutral, neutral.count == 3, neutral.allSatisfy({ $0.isFinite && $0 > 0 }) {
                 redGain = min(max(Float(neutral[1] / neutral[0]), 0.25), 4.0)
                 blueGain = min(max(Float(neutral[1] / neutral[2]), 0.25), 4.0)
             } else {
-                redGain = Float(meanGreen / max(meanRed, Double(blackLevel) + 1))
-                blueGain = Float(meanGreen / max(meanBlue, Double(blackLevel) + 1))
+                redGain = Float((meanGreen - Double(blackLevel)) / max(meanRed - Double(blackLevel), 1))
+                blueGain = Float((meanGreen - Double(blackLevel)) / max(meanBlue - Double(blackLevel), 1))
                 redGain = min(max(redGain, 0.5), 2.5)
                 blueGain = min(max(blueGain, 0.5), 2.5)
             }
         }
 
-        let redLUT = makeLUT(gain: redGain, scale: exposureScale)
-        let greenLUT = makeLUT(gain: 1, scale: exposureScale)
-        let blueLUT = makeLUT(gain: blueGain, scale: exposureScale)
-
         let rangeD = Double(usefullRange)
-        let scaleD = Double(exposureScale)
         let blackInt = Int(blackLevel)
+        func linearRGB(_ red: Int, _ green: Int, _ blue: Int) -> (Double, Double, Double) {
+            let lr = Double(max(red, 0) - blackInt) / rangeD
+            let lg = Double(max(green, 0) - blackInt) / rangeD
+            let lb = Double(max(blue, 0) - blackInt) / rangeD
+            if let cc = ccm {
+                return (cc[0] * lr + cc[1] * lg + cc[2] * lb,
+                        cc[3] * lr + cc[4] * lg + cc[5] * lb,
+                        cc[6] * lr + cc[7] * lg + cc[8] * lb)
+            }
+            return (lr * Double(redGain), lg, lb * Double(blueGain))
+        }
+        // A 16x16-sensor-pixel thumbnail keeps local adaptation small in memory.
+        // Average linear luminance before taking logarithms in BurstToneMap.
+        let toneBlock = 16
+        let toneWidth = (width + toneBlock - 1) / toneBlock
+        let toneHeight = (height + toneBlock - 1) / toneBlock
+        var thumbnail = [Double](repeating: 0, count: toneWidth * toneHeight)
+        for ty in 0..<toneHeight {
+            for tx in 0..<toneWidth {
+                var sum = 0.0, count = 0
+                for y in stride(from: ty * toneBlock, to: min((ty + 1) * toneBlock, height - 1), by: 2) {
+                    for x in stride(from: tx * toneBlock, to: min((tx + 1) * toneBlock, width - 1), by: 2) {
+                        let r = Int(merged[y * width + x])
+                        let g = (Int(merged[y * width + x + 1]) + Int(merged[(y + 1) * width + x])) / 2
+                        let b = Int(merged[(y + 1) * width + x + 1])
+                        let rgb = linearRGB(r, g, b)
+                        sum += max(0.2126 * rgb.0 + 0.7152 * rgb.1 + 0.0722 * rgb.2, 1e-5)
+                        count += 1
+                    }
+                }
+                thumbnail[ty * toneWidth + tx] = count > 0 ? sum / Double(count) : 0
+            }
+        }
+        let meter = try BurstExposure(luminances: thumbnail)
+        let exposureScale = Float(meter.scale)
+        let scaleD = meter.scale
+        let tone = try BurstToneMap(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth, height: toneHeight)
+        let spatialTone = refinesPhotoDetail ? previewReference.flatMap {
+            BurstPreviewSpatialTone(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth,
+                                    height: toneHeight, reference: $0)
+        } : nil
+        let previewTone = previewReference.flatMap { preview -> BurstPreviewTone? in
+            let rendered = thumbnail.indices.map { i -> Double in
+                let y = thumbnail[i] * scaleD
+                return BurstToneMap.renderedLuminance(y,
+                    gain: tone.gain(x: Double(i % toneWidth), y: Double(i / toneWidth)))
+            }
+            return BurstPreviewTone(rendered: rendered, width: toneWidth, height: toneHeight, reference: preview)
+        }
+        let meteredAt = CFAbsoluteTimeGetCurrent()
         func gammaIndex(_ value: Double) -> Int {
             let clamped = min(max(value, 0), 1)
             return min(Int(clamped * 4096.0), 4096)
         }
-        let gammaTable: [UInt8]
-        if ccm != nil {
-            var table = [UInt8](repeating: 0, count: 4097)
-            for index in 0...4096 {
-                table[index] = srgbByte(Double(index) / 4096.0)
-            }
-            gammaTable = table
-        } else {
-            gammaTable = []
-        }
+        let gammaTable = (0...4096).map { srgbByte(Double($0) / 4096.0) }
 
         let rgbBytes = UnsafeMutablePointer<UInt8>.allocate(capacity: pixelCount * 3)
         rgbBytes.initialize(repeating: 0, count: pixelCount * 3)
@@ -193,16 +254,17 @@ enum BurstProcessor {
 
         for y in 0..<height {
             let y0 = y * width
-            let yUp = max(y - 1, 0) * width
-            let yDown = min(y + 1, height - 1) * width
-            let yUp2 = max(y - 2, 0) * width
-            let yDown2 = min(y + 2, height - 1) * width
+            // Mirror borders instead of clamping: Bayer phase must stay intact.
+            let yUp = (y > 0 ? y - 1 : 1) * width
+            let yDown = (y + 1 < height ? y + 1 : height - 2) * width
+            let yUp2 = (y > 1 ? y - 2 : 2 - y) * width
+            let yDown2 = (y + 2 < height ? y + 2 : 2 * height - 4 - y) * width
             let evenRow = (y & 1) == 0
             for x in 0..<width {
-                let xm2 = x > 1 ? x - 2 : 0
-                let xm1 = x > 0 ? x - 1 : 0
-                let xp1 = x + 1 < width ? x + 1 : width - 1
-                let xp2 = x + 2 < width ? x + 2 : width - 1
+                let xm2 = x > 1 ? x - 2 : 2 - x
+                let xm1 = x > 0 ? x - 1 : 1
+                let xp1 = x + 1 < width ? x + 1 : width - 2
+                let xp2 = x + 2 < width ? x + 2 : 2 * width - 4 - x
                 let center = Int(merged[y0 + x])
                 let north = Int(merged[yUp + x])
                 let south = Int(merged[yDown + x])
@@ -249,25 +311,36 @@ enum BurstProcessor {
                 }
 
                 let offset = (y0 + x) * 3
-                if let cc = ccm {
-                    let lr = Double(max(red, 0) - blackInt) / rangeD
-                    let lg = Double(max(green, 0) - blackInt) / rangeD
-                    let lb = Double(max(blue, 0) - blackInt) / rangeD
-                    let sr = (cc[0] * lr + cc[1] * lg + cc[2] * lb) * scaleD
-                    let sg = (cc[3] * lr + cc[4] * lg + cc[5] * lb) * scaleD
-                    let sb = (cc[6] * lr + cc[7] * lg + cc[8] * lb) * scaleD
-                    rgbBytes[offset] = gammaTable[gammaIndex(sr)]
-                    rgbBytes[offset + 1] = gammaTable[gammaIndex(sg)]
-                    rgbBytes[offset + 2] = gammaTable[gammaIndex(sb)]
-                } else {
-                    rgbBytes[offset] = redLUT[min(max(red, 0), 65535)]
-                    rgbBytes[offset + 1] = greenLUT[min(max(green, 0), 65535)]
-                    rgbBytes[offset + 2] = blueLUT[min(max(blue, 0), 65535)]
-                }
+                let linear = linearRGB(red, green, blue)
+                let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
+                                     y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
+                let rendered = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
+                                                   blue: linear.2 * scaleD, gain: gain, previewTone: previewTone,
+                                                   spatialTone: spatialTone,
+                                                   x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
+                                                   y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
+                rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
+                rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
+                rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]
             }
         }
 
+        let renderedAt = CFAbsoluteTimeGetCurrent()
         denoiseInPlace(pixels: rgbBytes, width: width, height: height)
+        let denoisedAt = CFAbsoluteTimeGetCurrent()
+        let decode = (0...255).map { value -> Double in
+            let v = Double(value) / 255
+            return v <= 0.04045 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4)
+        }
+        for index in 0..<pixelCount {
+            let i = index * 3
+            let color = BurstColorLook.apply(red: decode[Int(rgbBytes[i])],
+                                             green: decode[Int(rgbBytes[i + 1])], blue: decode[Int(rgbBytes[i + 2])])
+            rgbBytes[i] = gammaTable[gammaIndex(color.0)]
+            rgbBytes[i + 1] = gammaTable[gammaIndex(color.1)]
+            rgbBytes[i + 2] = gammaTable[gammaIndex(color.2)]
+        }
+        let coloredAt = CFAbsoluteTimeGetCurrent()
 
         let byteCount = pixelCount * 3
         let rgbData = Data(bytes: rgbBytes, count: byteCount)
@@ -305,6 +378,7 @@ enum BurstProcessor {
             throw BurstError.jpegEncoding
         }
 
+        let finishedAt = CFAbsoluteTimeGetCurrent()
         return BurstProcessResult(
             jpegData: jpeg,
             width: outputWidth,
@@ -316,7 +390,27 @@ enum BurstProcessor {
             exposureScale: exposureScale,
             usedCCM: ccm != nil,
             denoised: true,
-            elapsedSeconds: CFAbsoluteTimeGetCurrent() - started
+            elapsedSeconds: finishedAt - started,
+            stageSeconds: ["alignment": alignedAt - started, "fusion": fusedAt - alignedAt,
+                           "metering_tone_map": meteredAt - fusedAt, "demosaic_render": renderedAt - meteredAt,
+                           "chroma_filter": denoisedAt - renderedAt, "perceptual_color": coloredAt - denoisedAt,
+                           "rotation_jpeg": finishedAt - coloredAt],
+            exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
+                            "local_alignment_refined_tiles": Double(localFields?.reduce(0) { $0 + $1.refinedTiles } ?? 0),
+                            "local_alignment_total_tiles": Double(localFields?.dropFirst().reduce(0) { $0 + $1.offsets.count } ?? 0),
+                            "residual_spatial_factor": Double(spatialFactor),
+                            "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
+                            "adjustment_over_luminance_median_ev": meter.adjustmentEV,
+                            "preview_available": previewReference == nil ? 0 : 1,
+                            "preview_tone_used": spatialTone != nil || previewTone != nil ? 1 : 0,
+                            "preview_spatial_tone_used": spatialTone == nil ? 0 : 1,
+                            "preview_contrast_curve_used": spatialTone == nil && previewTone?.usesContrastCurve == true ? 1 : 0,
+                            "preview_scene_correlation": spatialTone?.correlation ?? previewTone?.correlation ?? 0,
+                            "preview_median_correction_ev": spatialTone?.medianCorrectionEV ?? previewTone?.medianCorrectionEV ?? 0,
+                            "hdr_exposure_ratio": hdrRatio ?? 1,
+                            "hdr_blended_cells": Double(hdrStats.blendedCells),
+                            "hdr_motion_rejected_cells": Double(hdrStats.motionRejectedCells),
+                            "hdr_short_clipped_cells": Double(hdrStats.shortClippedCells)]
         )
     }
 
@@ -356,12 +450,10 @@ enum BurstProcessor {
                 let centerLuma = Float(luma[centerIndex])
                 let shadow = 1.0 - min(centerLuma, 110.0) / 110.0
                 let threshold = 14.0 + shadow * 20.0
-                let lumaBlend = 0.25 + shadow * 0.25
                 let xStart = max(0, x - radius)
                 let xEnd = min(width - 1, x + radius)
                 var chromaRed: Float = 0
                 var chromaBlue: Float = 0
-                var lumaSum: Float = 0
                 var weightSum: Float = 0
                 for neighborY in yStart...yEnd {
                     let row = neighborY * width
@@ -374,12 +466,13 @@ enum BurstProcessor {
                         let neighborLuma = Float(luma[neighborIndex])
                         chromaRed += (Float(source[offset]) - neighborLuma) * weight
                         chromaBlue += (Float(source[offset + 2]) - neighborLuma) * weight
-                        lumaSum += neighborLuma * weight
                         weightSum += weight
                     }
                 }
                 guard weightSum > 0 else { continue }
-                let outputLuma = centerLuma * (1.0 - lumaBlend) + (lumaSum / weightSum) * lumaBlend
+                // Preserve the merged luminance texture. The spatial filter only
+                // averages chroma; temporal merge remains responsible for luma noise.
+                let outputLuma = centerLuma
                 let outputRed = outputLuma + chromaRed / weightSum
                 let outputBlue = outputLuma + chromaBlue / weightSum
                 let outputGreen = (outputLuma - 0.299 * outputRed - 0.114 * outputBlue) / 0.587
@@ -395,15 +488,6 @@ enum BurstProcessor {
         UInt8(min(max(value.rounded(), 0), 255))
     }
 
-    private static func makeLUT(gain: Float, scale: Float) -> [UInt8] {
-        var lut = [UInt8](repeating: 0, count: 65536)
-        for value in 0..<65536 {
-            let linear = max(0, (Float(value) - blackLevel) / usefullRange * scale * gain)
-            lut[value] = srgbByte(Double(min(1, linear)))
-        }
-        return lut
-    }
-
     private static func srgbByte(_ linear: Double) -> UInt8 {
         let clamped = min(max(linear, 0), 1)
         let encoded = clamped <= 0.0031308
@@ -412,23 +496,17 @@ enum BurstProcessor {
         return UInt8((encoded * 255.0).rounded())
     }
 
-    private static func estimateShift(reference: BurstFrame, frame: BurstFrame) -> Shift {
-        guard let referenceProfiles = profiles(for: reference),
-              let frameProfiles = profiles(for: frame) else {
-            return Shift(dx: 0, dy: 0)
-        }
-        let dy = bestShift(referenceProfiles.rows, frameProfiles.rows, maxShift: 64)
-        let dx = bestShift(referenceProfiles.columns, frameProfiles.columns, maxShift: 64)
-        return Shift(dx: (dx / 2) * 2, dy: (dy / 2) * 2)
-    }
-
-    private static func profiles(for frame: BurstFrame) -> (rows: [Float], columns: [Float])? {
+    private static func profiles(for frame: BurstFrame, signalScale: Double? = nil) -> (rows: [Float], columns: [Float])? {
         let width = frame.width
         let height = frame.height
         let rowBytes = frame.bytesPerRow
         guard rowBytes >= width * 2 else { return nil }
         return frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) -> (rows: [Float], columns: [Float])? in
             guard let base = raw.baseAddress else { return nil }
+            func value(_ sample: UInt16) -> UInt64 {
+                guard let signalScale else { return UInt64(sample) }
+                return UInt64(min(max((Double(sample) - 2112) * signalScale, 0), 0.8 * 14271).rounded())
+            }
 
             var rowSums = [UInt64](repeating: 0, count: height)
             var rowCounts = [UInt32](repeating: 0, count: height)
@@ -436,7 +514,7 @@ enum BurstProcessor {
                 let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
                 var x = 0
                 while x < width {
-                    rowSums[y] += UInt64(row[x])
+                    rowSums[y] += value(row[x])
                     rowCounts[y] += 1
                     x += 8
                 }
@@ -449,11 +527,11 @@ enum BurstProcessor {
                 var y = 0
                 while y < height {
                     let row = base.advanced(by: y * rowBytes).assumingMemoryBound(to: UInt16.self)
-                    columnSums[x] += UInt64(row[x])
+                    columnSums[x] += value(row[x])
                     columnCounts[x] += 1
                     y += 8
                 }
-                x += 8
+                x += 1
             }
 
             let rows = (0..<height).map { Float(rowSums[$0]) / Float(max(rowCounts[$0], 1)) }
@@ -462,60 +540,4 @@ enum BurstProcessor {
         }
     }
 
-    private static func bestShift(_ reference: [Float], _ current: [Float], maxShift: Int) -> Int {
-        let count = min(reference.count, current.count)
-        guard count > maxShift * 4 else { return 0 }
-        var best = 0
-        var bestScore = Float.greatestFiniteMagnitude
-        for shift in -maxShift...maxShift {
-            var score: Double = 0
-            var samples = 0
-            var index = max(0, -shift)
-            let end = min(count, count - shift)
-            while index < end {
-                score += abs(Double(reference[index]) - Double(current[index + shift]))
-                samples += 1
-                index += 1
-            }
-            guard samples > count / 2 else { continue }
-            let average = score / Double(samples)
-            if average < Double(bestScore) {
-                bestScore = Float(average)
-                best = shift
-            }
-        }
-        return best
-    }
-
-    private static func accumulate(
-        frame: BurstFrame,
-        into sums: UnsafeMutablePointer<UInt32>,
-        counts: UnsafeMutablePointer<UInt8>,
-        width: Int,
-        height: Int,
-        shift: Shift
-    ) {
-        let rowBytes = frame.bytesPerRow
-        guard rowBytes >= width * 2 else { return }
-        frame.data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
-            guard let base = raw.baseAddress else { return }
-            let yStart = max(0, -shift.dy)
-            let yEnd = min(height, height - shift.dy)
-            let xStart = max(0, -shift.dx)
-            let xEnd = min(width, width - shift.dx)
-            guard xStart < xEnd, yStart < yEnd else { return }
-            for y in yStart..<yEnd {
-                let source = base.advanced(by: (y + shift.dy) * rowBytes).assumingMemoryBound(to: UInt16.self)
-                let destination = y * width
-                var x = xStart
-                while x < xEnd {
-                    sums[destination + x] += UInt32(source[x + shift.dx])
-                    if counts[destination + x] < 255 {
-                        counts[destination + x] += 1
-                    }
-                    x += 1
-                }
-            }
-        }
-    }
 }

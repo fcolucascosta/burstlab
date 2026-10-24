@@ -41,7 +41,7 @@ class IPAPackageTests(unittest.TestCase):
         app = self.root / "BurstLab.app"
         app.mkdir()
         (app / "BurstLab").write_bytes(macho())
-        info = {"CFBundleExecutable": "BurstLab", "CFBundleIdentifier": "dev.test.burstlab", "CFBundleShortVersionString": "0.1.0"}
+        info = {"CFBundleExecutable": "BurstLab", "CFBundleIdentifier": "dev.lucas.burstlab.ios", "CFBundleShortVersionString": "0.1.0"}
         (app / "Info.plist").write_bytes(plistlib.dumps(info))
         with self.assertRaisesRegex(ValueError, "camera usage"):
             packager.package(app, self.root / "dist" / "BurstLab-unsigned.ipa")
@@ -50,8 +50,8 @@ class IPAPackageTests(unittest.TestCase):
         app = self.root / "BurstLab.app"
         app.mkdir()
         (app / "BurstLab").write_bytes(macho())
-        info = {"CFBundleExecutable": "BurstLab", "CFBundleIdentifier": "dev.test.burstlab", "CFBundleShortVersionString": "0.1.0",
-                "NSCameraUsageDescription": "Burst captures"}
+        info = {"CFBundleExecutable": "BurstLab", "CFBundleIdentifier": "dev.lucas.burstlab.ios", "CFBundleShortVersionString": "0.1.0",
+                "NSCameraUsageDescription": "Burst captures", "NSPhotoLibraryAddUsageDescription": "Save captures"}
         (app / "Info.plist").write_bytes(plistlib.dumps(info))
         output = self.root / "dist" / "BurstLab-unsigned.ipa"
         packager.package(app, output)
@@ -61,6 +61,64 @@ class IPAPackageTests(unittest.TestCase):
         manifest = json.loads((output.parent / "BurstLab-0.1.0-build.json").read_text())
         self.assertEqual(manifest["binary"]["platform"], "iPhoneOS")
         self.assertEqual(len(manifest["ipa_sha256"]), 64)
+
+    def make_app(self):
+        app = self.root / "BurstLab.app"
+        app.mkdir()
+        (app / "BurstLab").write_bytes(macho())
+        info = {"CFBundleExecutable": "BurstLab", "CFBundleIdentifier": "dev.lucas.burstlab.ios",
+                "CFBundleShortVersionString": "0.2.7", "NSCameraUsageDescription": "Capture",
+                "NSPhotoLibraryAddUsageDescription": "Save"}
+        (app / "Info.plist").write_bytes(plistlib.dumps(info))
+        return app
+
+    def test_rejects_code_signature_command(self):
+        executable = self.root / "App"
+        data = bytearray(macho())
+        struct.pack_into("<2I", data, 16, 2, 40)
+        data.extend(struct.pack("<4I", 0x1D, 16, 0, 0))
+        executable.write_bytes(data)
+        with self.assertRaisesRegex(ValueError, "code signature"):
+            packager.inspect_device_executable(executable)
+
+    def test_rejects_provisioning_and_signature_directory(self):
+        app = self.make_app()
+        for name in ("embedded.mobileprovision", "_CodeSignature"):
+            with self.subTest(name=name):
+                marker = app / name
+                marker.write_bytes(b"unexpected")
+                with self.assertRaisesRegex(ValueError, "unsigned bundle"):
+                    packager.package(app, self.root / "out.ipa")
+                marker.unlink()
+
+    def test_existing_version_is_preserved(self):
+        app = self.make_app()
+        output = self.root / "out.ipa"
+        packager.package(app, output)
+        original = output.read_bytes()
+        manifest = self.root / "BurstLab-0.2.7-build.json"
+        original_manifest = manifest.read_bytes()
+        with self.assertRaises(FileExistsError):
+            packager.package(app, output)
+        self.assertEqual(output.read_bytes(), original)
+        self.assertEqual(manifest.read_bytes(), original_manifest)
+        output.unlink()
+        with self.assertRaises(FileExistsError):
+            packager.package(app, output)
+
+    def test_rejects_wrong_bundle_and_missing_save_permission(self):
+        app = self.make_app()
+        info_path = app / "Info.plist"
+        info = plistlib.loads(info_path.read_bytes())
+        info["CFBundleIdentifier"] = "dev.other.app"
+        info_path.write_bytes(plistlib.dumps(info))
+        with self.assertRaisesRegex(ValueError, "bundle identifier"):
+            packager.package(app, self.root / "out.ipa")
+        info["CFBundleIdentifier"] = "dev.lucas.burstlab.ios"
+        del info["NSPhotoLibraryAddUsageDescription"]
+        info_path.write_bytes(plistlib.dumps(info))
+        with self.assertRaisesRegex(ValueError, "photo library"):
+            packager.package(app, self.root / "out.ipa")
 
     def test_default_package_names_include_version(self):
         info = {"CFBundleShortVersionString": "1.4.2"}

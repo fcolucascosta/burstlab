@@ -6,6 +6,6 @@ let package = Package(
     products: [.library(name: "BurstCore", targets: ["BurstCore"])],
     targets: [
         .target(name: "BurstCore", path: "Shared"),
-        .testTarget(name: "BurstCoreTests", dependencies: ["BurstCore"], path: "Tests")
+        .testTarget(name: "BurstCoreTests", dependencies: ["BurstCore"], path: "Tests", resources: [.copy("Fixtures")])
     ]
 )

@@ -11,8 +11,25 @@ SOURCES = [
     "Apple/ContentView.swift",
     "Apple/CameraController.swift",
     "Apple/BurstProcessor.swift",
+    "Apple/BurstDiagnostics.swift",
     "Apple/CameraPreview.swift",
+    "Apple/BurstPreviewSampler.swift",
+    "Apple/BurstAppleRAWReference.swift",
+    "Apple/BurstStoredPhotoReplay.swift",
     "Shared/BurstConfig.swift",
+    "Shared/BurstFusion.swift",
+    "Shared/BurstToneMap.swift",
+    "Shared/BurstExposure.swift",
+    "Shared/BurstColorLook.swift",
+    "Shared/BurstCapturePlan.swift",
+    "Shared/BurstHDR.swift",
+    "Shared/BurstFrameFreshness.swift",
+    "Shared/BurstPreviewTone.swift",
+    "Shared/BurstDiagnosticStorage.swift",
+    "Shared/BurstLocalAlignment.swift",
+    "Shared/BurstFrameBudget.swift",
+    "Shared/BurstPreviewSpatialTone.swift",
+    "Shared/BurstRAWDecoderSelection.swift",
 ]
 
 
@@ -58,10 +75,13 @@ def generate():
         "PBXFrameworksBuildPhase",
         "buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
     )
+    assets = obj("assets", "PBXFileReference",
+                 f"lastKnownFileType = folder.assetcatalog; path = {q('Apple/Assets.xcassets')}; sourceTree = SOURCE_ROOT;")
+    asset_build = obj("assetbuild", "PBXBuildFile", f"fileRef = {assets};")
     resources_phase = obj(
         TARGET + "resources",
         "PBXResourcesBuildPhase",
-        "buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0;",
+        f"buildActionMask = 2147483647; files = {array([asset_build])}; runOnlyForDeploymentPostprocessing = 0;",
     )
 
     configs = []
@@ -72,6 +92,7 @@ def generate():
             "PRODUCT_BUNDLE_IDENTIFIER": "dev.lucas.burstlab.ios",
             "INFOPLIST_FILE": "Apple/Info-iOS.plist",
             "GENERATE_INFOPLIST_FILE": "NO",
+            "ASSETCATALOG_COMPILER_APPICON_NAME": "AppIcon",
             "CODE_SIGN_STYLE": "Automatic",
             "SWIFT_VERSION": "5.0",
             "ENABLE_USER_SCRIPT_SANDBOXING": "YES",
@@ -104,18 +125,20 @@ def generate():
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "0.2.6",
+        "CFBundleShortVersionString": "0.9.0",
         "CFBundleVersion": "1",
         "NSCameraUsageDescription": "BurstLab usa a camera para capturar e processar fotos computacionais.",
         "NSPhotoLibraryAddUsageDescription": "BurstLab salva as fotos capturadas na sua fototeca.",
         "UILaunchScreen": {},
         "UISupportedInterfaceOrientations": ["UIInterfaceOrientationPortrait"],
         "LSRequiresIPhoneOS": True,
+        "UIFileSharingEnabled": True,
+        "LSSupportsOpeningDocumentsInPlace": True,
     }
     (ROOT / "Apple" / "Info-iOS.plist").write_bytes(plistlib.dumps(info))
 
     product_group = obj("products", "PBXGroup", f"children = {array([product])}; name = Products; sourceTree = {q('<group>')};")
-    group = obj("root", "PBXGroup", f"children = {array(list(references.values()) + [product_group])}; sourceTree = {q('<group>')};")
+    group = obj("root", "PBXGroup", f"children = {array(list(references.values()) + [assets, product_group])}; sourceTree = {q('<group>')};")
     project_configs = [
         obj("project" + name, "XCBuildConfiguration", f"buildSettings = {{ CLANG_ENABLE_MODULES = YES; }}; name = {name};")
         for name in ["Debug", "Release"]

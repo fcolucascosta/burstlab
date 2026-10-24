@@ -4,9 +4,22 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual:** F1 concluida. A sonda no aparelho confirmou RAW Bayer (`rgg4`, 14-bit RGGB), exposicao ate 0,5 s por frame, ISO 22-2112 e 3,79 GB de memoria. Proximo passo: sonda de burst RAW (taxa, nivel de preto/saturacao, termica) antes do merge.
+**Estado atual (0.8.0):** Foto seleciona12/16/20RAWs pelo sinal de sombras e modelo de ruido do primeiro RAW, priorizando qualidade dentro de um orcamento de memoria. Refina translacoes locais pares em guia verde e trata ruido espectral residual apos a fusao. Isso ainda nao e super-resolucao nem alinhamento subpixel. Noite/Longa continuam16frames com ate0,5s/frame. RAWs de diagnostico agora valem apenas para o proximo disparo, substituem o ensaio anterior, tem limite de512MiB e expiram ao usar o app depois de24horas; ha limpeza nos Ajustes. Icone incluido. A interface4:3, toque para foco/exposicao e acabamento guiado pelo preview continuam. A verificacao de identidade/timestamps introduzida na0.7.0 continua rejeitando RAWs repetidos. Comparacao opcional com CIRAWFilter usa um DNG individual. Build nao aprova qualidade: superioridade sobre a camera padrao, latencia e pico de memoria exigem readback fisico da0.8.0.
+
+**Primeiro readback0.7.0:**16RAWs distintos confirmados por SHA256,0rejeicoes e intervalo minimo0,506s entre timestamps em Noite0,5s/ISO160. O usuario relatou melhora acentuada. O novo enquadramento nao permite aprovar por esse teste a cor do tecido anterior; SNR/foco quantitativos, HDR e decoder Apple ainda precisam de ensaios especificos. O registro de identidades confirma a correcao das duplicatas neste teste, sem demonstrar qualidade geral em todas as cenas.
 
 ## Documentacao
+
+- [Interface e foco por toque](docs/camera-ui.md).
+- [Revelador Apple e pesquisa de ML](docs/apple-raw.md).
+
+- [Preview como referencia do acabamento](docs/preview.md): contraste, preservacao dos pretos, fallback e readback.
+
+- [Noite e longa exposicao em tripe](docs/night.md): politica de captura, uso dos modos e evidencia pendente.
+
+- [Auditoria HDR+, Indigo e GCam mods](docs/pipeline-audit.md): inspecao estatica, referencias executaveis e lacunas do pipeline.
+
+- [Qualidade e ensaios reproduziveis](docs/quality.md): prioridade fotografica, limites conhecidos e comparacoes com a camera padrao.
 
 - [Pipeline e pesquisa](docs/pipeline.md): o que o Indigo faz, o que vamos implementar, algoritmos e limites do SE.
 - [Build e instalacao no Windows](docs/build.md): GitHub Actions + iLoader.
