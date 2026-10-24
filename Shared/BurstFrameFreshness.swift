@@ -5,14 +5,15 @@ import CryptoKit
 /// A capture callback/EXIF exposure is not proof of a new sensor image.
 /// Count only increasing photo timestamps and previously unseen RAW pixels.
 public struct BurstFrameFreshness {
-    public enum Failure: Error { case invalidFrame, invalidTimestamp }
-    private var seen = Set<SHA256.Digest>()
+    public enum Failure: Error { case invalidFrame, invalidTimestamp, hashingUnavailable }
+    private var seen = Set<String>()
     private var lastTimestamp: Double?
     public private(set) var hashes: [String] = []
     public private(set) var rejectedCount = 0
     public init() {}
 
     public mutating func accept(_ frame: BurstRawFrame, timestamp: Double) throws -> Bool {
+        guard #available(macOS 10.15, iOS 13, *) else { throw Failure.hashingUnavailable }
         guard timestamp.isFinite, timestamp >= 0 else { throw Failure.invalidTimestamp }
         guard BurstRawLayout.isValid(width: frame.width, height: frame.height,
             bytesPerRow: frame.bytesPerRow, byteCount: frame.data.count) else { throw Failure.invalidFrame }
@@ -27,12 +28,13 @@ public struct BurstFrameFreshness {
             }
         }
         let digest = hasher.finalize()
-        guard !seen.contains(digest), lastTimestamp.map({ timestamp > $0 }) ?? true else {
+        let hash = digest.map { String(format: "%02x", $0) }.joined()
+        guard !seen.contains(hash), lastTimestamp.map({ timestamp > $0 }) ?? true else {
             rejectedCount += 1
             return false
         }
-        seen.insert(digest); lastTimestamp = timestamp
-        hashes.append(digest.map { String(format: "%02x", $0) }.joined())
+        seen.insert(hash); lastTimestamp = timestamp
+        hashes.append(hash)
         return true
     }
 
