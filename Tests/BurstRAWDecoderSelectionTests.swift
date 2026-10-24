@@ -5,7 +5,7 @@ final class BurstRAWDecoderSelectionTests: XCTestCase {
     func testActualAscendingDeviceListSelectsNineDNGInsteadOfSix() {
         let actual = ["6.dng", "7", "7.dng", "8", "8.dng", "9.dng"]
         XCTAssertEqual(BurstRAWDecoderSelection.newest(supported: actual, current: "8"), "9.dng")
-        XCTAssertEqual(BurstRAWDecoderSelection.newest(supported: actual.reversed(), current: "8"), "9.dng")
+        XCTAssertEqual(BurstRAWDecoderSelection.newest(supported: Array(actual.reversed()), current: "8"), "9.dng")
     }
     func testNumericOrderingHandlesTenAndMinorVersionsAndKeepsNewerDefault() {
         XCTAssertEqual(BurstRAWDecoderSelection.newest(supported: ["9.dng", "10.dng", "9.2.dng"], current: "8"), "10.dng")

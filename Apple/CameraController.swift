@@ -157,11 +157,11 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                                                            appropriateFor: nil, create: true)
                 let storage = BurstDiagnosticStorage(documents: documents)
                 if removeAll { try storage.removeAll() } else { try storage.prune() }
-                let bytes = try storage.usageBytes()
+                let bytes = try storage.usageBytes() + BurstDiagnostics.pruneReceipt(removeAll: removeAll)
                 DispatchQueue.main.async {
                     self.diagnosticBytes = bytes
                     if removeAll {
-                        self.diagnosticNote = "RAWs de diagnostico apagados."
+                        self.diagnosticNote = "Diagnosticos apagados."
                         self.appleRawReferenceData = nil
                         self.appleRawStatus = ""
                     }
@@ -998,6 +998,13 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     } catch {
                         self.burstLog.notice("processing report failed: \(error.localizedDescription, privacy: .public)")
                     }
+                }
+                do {
+                    try BurstDiagnostics.saveReceipt(result, config: config, preview: preview, rotation: rotationAngle,
+                                                     noiseProfile: noiseProfile, frameHashes: frameHashes,
+                                                     exposureReadings: exposureReadings, frameBudget: frameBudget)
+                } catch {
+                    self.burstLog.notice("capture receipt failed: \(error.localizedDescription, privacy: .public)")
                 }
                 self.saveBurst(result)
             } catch {

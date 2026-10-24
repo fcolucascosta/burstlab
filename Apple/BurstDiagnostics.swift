@@ -1,8 +1,9 @@
 import Foundation
+import CryptoKit
 
 /// Opt-in capture evidence. No uploads; files stay in the app's Documents folder.
 enum BurstDiagnostics {
-    static func saveProcessing(_ result: BurstProcessResult, directory: URL, noiseProfile: [Double]?) throws {
+    private static func processingReport(_ result: BurstProcessResult, noiseProfile: [Double]?) -> [String: Any] {
         var report: [String: Any] = [
             "schema_version": 1,
             "elapsed_processing_seconds": result.elapsedSeconds,
@@ -13,8 +14,60 @@ enum BurstDiagnostics {
             "limitations": "Timing excludes RAW export and photo-library save. No peak-memory or image-quality measurement."
         ]
         if let noiseProfile { report["noise_profile"] = noiseProfile }
+        return report
+    }
+
+    static func saveProcessing(_ result: BurstProcessResult, directory: URL, noiseProfile: [Double]?) throws {
+        let report = processingReport(result, noiseProfile: noiseProfile)
         let json = try JSONSerialization.data(withJSONObject: report, options: [.prettyPrinted, .sortedKeys])
         try json.write(to: directory.appendingPathComponent("processing.json"), options: .atomic)
+    }
+
+    /// One bounded record makes ordinary captures diagnosable without keeping
+    /// RAWs. It replaces itself, is excluded from backup and expires in 24 h.
+    private static let receiptLimit = 64 * 1024
+    private static func receiptURL() throws -> URL {
+        try FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("UltimaCaptura.json")
+    }
+
+    static func saveReceipt(_ result: BurstProcessResult, config: BurstConfig, preview: BurstPreviewSample?,
+                            rotation: Int, noiseProfile: [Double]?, frameHashes: [String],
+                            exposureReadings: [[String: Double]], frameBudget: [String: Double]) throws {
+        var report = processingReport(result, noiseProfile: noiseProfile)
+        report["created_at"] = ISO8601DateFormatter().string(from: Date())
+        report["app_version"] = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown"
+        report["capture_mode"] = config.mode.rawValue
+        report["rotation_degrees_clockwise"] = rotation
+        report["pixel_hashes"] = frameHashes
+        report["actual_exposures"] = exposureReadings
+        report["adaptive_frame_budget"] = frameBudget
+        report["jpeg_sha256"] = SHA256.hash(data: result.jpegData).map { String(format: "%02x", $0) }.joined()
+        if let preview {
+            report["preview"] = ["width": preview.reference.width, "height": preview.reference.height,
+                                 "rgba8_base64": preview.rgba.base64EncodedString(), "encoding": "sRGB unrotated video proxy"]
+        }
+        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+        guard data.count <= receiptLimit else { throw CocoaError(.fileWriteOutOfSpace) }
+        var url = try receiptURL()
+        try data.write(to: url, options: .atomic)
+        var values = URLResourceValues(); values.isExcludedFromBackup = true
+        try url.setResourceValues(values)
+    }
+
+    static func pruneReceipt(removeAll: Bool = false) throws -> Int64 {
+        let url = try receiptURL(), manager = FileManager.default
+        guard manager.fileExists(atPath: url.path) else { return 0 }
+        let values = try url.resourceValues(forKeys: [.isSymbolicLinkKey, .fileSizeKey])
+        if removeAll || values.isSymbolicLink == true || (values.fileSize ?? 0) > receiptLimit {
+            try manager.removeItem(at: url); return 0
+        }
+        let data = try Data(contentsOf: url)
+        if let report = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let text = report["created_at"] as? String, let date = ISO8601DateFormatter().date(from: text),
+           (0..<BurstDiagnosticStorage.lifetime).contains(Date().timeIntervalSince(date)) { return Int64(data.count) }
+        try manager.removeItem(at: url)
+        return 0
     }
 
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
