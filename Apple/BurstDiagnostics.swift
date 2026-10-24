@@ -19,7 +19,8 @@ enum BurstDiagnostics {
 
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
                      neutral: [Double]?, transform: [Double]?, config: BurstConfig,
-                     plan: BurstCapturePlan?, exposureReadings: [[String: Double]], preview: BurstPreviewSample?) throws -> URL {
+                     plan: BurstCapturePlan?, exposureReadings: [[String: Double]], preview: BurstPreviewSample?,
+                     frameHashes: [String], duplicateRejections: Int) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,
                                                    in: .userDomainMask, appropriateFor: nil, create: true)
         let directory = documents.appendingPathComponent("Ensaios", isDirectory: true)
@@ -29,14 +30,16 @@ enum BurstDiagnostics {
         for (index, frame) in frames.enumerated() {
             let name = String(format: "frame-%02d.raw16", index)
             try frame.data.write(to: directory.appendingPathComponent(name), options: .atomic)
-            entries.append(["file": name, "width": frame.width, "height": frame.height,
-                            "bytes_per_row": frame.bytesPerRow, "byte_count": frame.data.count])
+            var entry: [String: Any] = ["file": name, "width": frame.width, "height": frame.height,
+                                       "bytes_per_row": frame.bytesPerRow, "byte_count": frame.data.count]
+            if frameHashes.indices.contains(index) { entry["pixel_sha256"] = frameHashes[index] }
+            entries.append(entry)
         }
         if let referenceDNG {
             try referenceDNG.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic)
         }
         var manifest: [String: Any] = [
-            "schema_version": 3,
+            "schema_version": 4,
             "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             "created_at": ISO8601DateFormatter().string(from: Date()),
             "pixel_format": "rgg4", "storage": "little-endian UInt16, row stride included",
@@ -48,6 +51,8 @@ enum BurstDiagnostics {
             "merge": config.usesRobustMerge ? "reference_anchored_spectral" : "aligned_equal_weight_average",
             "requested_frame_count": config.frameCount,
             "actual_exposures": exposureReadings,
+            "unique_pixel_frames": Set(frameHashes).count,
+            "repeated_or_stale_raw_rejections": duplicateRejections,
             "limitations": "Fixed sensor levels are historical assumptions; no measured quality claim."
         ]
         if let neutral { manifest["as_shot_neutral"] = neutral }
@@ -68,7 +73,11 @@ enum BurstDiagnostics {
         }
         if exposureReadings.count == frames.count,
            exposureReadings.allSatisfy({ $0["duration_seconds"] != nil }) {
-            manifest["measured_integration_seconds"] = exposureReadings.reduce(0.0) { $0 + ($1["duration_seconds"] ?? 0) }
+            manifest["unique_frame_exposure_sum_seconds"] = exposureReadings.reduce(0.0) { $0 + ($1["duration_seconds"] ?? 0) }
+        }
+        if let first = exposureReadings.first?["photo_timestamp_seconds"],
+           let last = exposureReadings.last?["photo_timestamp_seconds"] {
+            manifest["accepted_photo_timestamp_span_seconds"] = last - first
         }
         let json = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         // A manifest is written last, so interrupted exports are identifiable.

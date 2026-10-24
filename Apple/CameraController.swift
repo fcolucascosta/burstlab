@@ -87,6 +87,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var burstPlan: BurstCapturePlan?
     private var burstExposureReadings: [[String: Double]] = []
     private var burstCurrentShort = false
+    private var burstFreshness = BurstFrameFreshness()
+    private var burstDuplicateRetries = 0
+    private var burstLastRequestAt: CFAbsoluteTime = 0
+    private var burstLastRequestDuration = 0.0
     private var burstRetries = 0
     private var burstReadinessPolls = 0
     private var burstRotationAngle = 90
@@ -520,6 +524,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             self.burstPlan = nil
             self.burstExposureReadings.removeAll()
             self.burstCurrentShort = false
+            self.burstFreshness = BurstFrameFreshness()
+            self.burstDuplicateRetries = 0
+            self.burstLastRequestAt = 0
+            self.burstLastRequestDuration = 0
             self.burstFormat = rawFormat
             self.burstFrames.removeAll()
             self.burstRemaining = self.burstConfig.frameCount
@@ -635,6 +643,18 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     private func captureBurstFrame() {
         guard burstActive, burstRemaining > 0 else { return }
+        if burstConfig.mode != .photo {
+            let wait = BurstFrameFreshness.tripodWait(elapsed: CFAbsoluteTimeGetCurrent() - burstLastRequestAt,
+                                                     previousExposure: burstLastRequestDuration)
+            if wait > 0 {
+                let generation = burstGeneration
+                sessionQueue.asyncAfter(deadline: .now() + wait) {
+                    guard self.burstGeneration == generation else { return }
+                    self.captureBurstFrame()
+                }
+                return
+            }
+        }
         guard session.isRunning else {
             abortBurst("Burst interrompido: sessao de camera parou.")
             return
@@ -687,6 +707,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let settings = AVCapturePhotoSettings(rawPixelFormatType: burstFormat)
         settings.photoQualityPrioritization = .speed
         settings.flashMode = .off
+        burstLastRequestAt = CFAbsoluteTimeGetCurrent()
+        burstLastRequestDuration = burstPlan?.duration(for: burstFrames.count) ?? 0
         submitPhoto(settings, kind: .burst)
     }
 
@@ -730,6 +752,29 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             abortBurst("Burst: falha ao copiar frame RAW.")
             return
         }
+        let timestamp = CMTimeGetSeconds(photo.timestamp)
+        do {
+            let fresh = try burstFreshness.accept(frame, timestamp: timestamp)
+            if !fresh {
+                burstDuplicateRetries += 1
+                guard burstDuplicateRetries <= 3 else {
+                    abortBurst("A camera repetiu RAWs; captura cancelada para evitar empilhar imagens iguais.")
+                    return
+                }
+                burstLog.notice("repeated/stale RAW rejected, total=\(self.burstFreshness.rejectedCount, privacy: .public)")
+                DispatchQueue.main.async { self.status = "Aguardando uma nova exposicao…" }
+                let generation = burstGeneration
+                sessionQueue.asyncAfter(deadline: .now() + max(burstLastRequestDuration, 0.1)) {
+                    guard self.burstGeneration == generation else { return }
+                    self.captureBurstFrame()
+                }
+                return
+            }
+        } catch {
+            abortBurst("RAW sem identidade/timestamp valido; captura cancelada.")
+            return
+        }
+        burstDuplicateRetries = 0
         if burstFrames.isEmpty, burstConfig.mode == .night,
            BurstHDR.highlightFraction(frame) >= 0.0005 {
             burstPlan?.bracketsHighlights = true
@@ -738,6 +783,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         burstFrames.append(frame)
         let exif = photo.metadata[kCGImagePropertyExifDictionary as String] as? [String: Any] ?? [:]
         var reading: [String: Double] = ["frame_index": Double(burstExposureReadings.count)]
+        reading["photo_timestamp_seconds"] = timestamp
         reading["highlight_frame"] = burstCurrentShort ? 1 : 0
         if let seconds = exif[kCGImagePropertyExifExposureTime as String] as? NSNumber,
            seconds.doubleValue.isFinite, seconds.doubleValue > 0 { reading["duration_seconds"] = seconds.doubleValue }
@@ -823,6 +869,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let config = burstConfig
         let plan = burstPlan
         let exposureReadings = burstExposureReadings
+        let frameHashes = burstFreshness.hashes
+        let duplicateRejections = burstFreshness.rejectedCount
         let highlightFrames = plan?.shortIndices ?? []
         let exposureProducts: [Double]? = exposureReadings.allSatisfy({ $0["duration_seconds"] != nil && $0["iso"] != nil })
             ? exposureReadings.map { ($0["duration_seconds"] ?? 0) * ($0["iso"] ?? 0) } : nil
@@ -870,7 +918,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     let directory = try BurstDiagnostics.save(frames: frames, referenceDNG: referenceDNG,
                                                               rotation: rotationAngle, neutral: asShotNeutral,
                                                               transform: colorTransform, config: config, plan: plan,
-                                                              exposureReadings: exposureReadings, preview: preview)
+                                                              exposureReadings: exposureReadings, preview: preview,
+                                                              frameHashes: frameHashes, duplicateRejections: duplicateRejections)
                     diagnosticDirectory = directory
                     DispatchQueue.main.async {
                         self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
