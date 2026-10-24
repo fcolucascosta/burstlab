@@ -49,9 +49,11 @@ struct ContentView: View {
                                  fallback: camera.status, diagnosticNote: camera.diagnosticNote,
                                  captureNote: camera.lastCaptureNote,
                                  appleRawStatus: camera.appleRawStatus, appleRawData: camera.appleRawReferenceData,
+                                 replayStatus: camera.replayStatus, replayData: camera.replayData,
                                  diagnosticBytes: camera.diagnosticBytes,
                                  recordDiagnostics: $recordDiagnostics, canProbe: !busy,
                                  onProbe: { camera.probeRawBurst() }, onAppleRAW: { camera.compareAppleRAW() },
+                                 onReplay: { camera.replayStoredPhoto() },
                                  onClearRAW: { camera.refreshDiagnosticStorage(removeAll: true) })
         }
         .sheet(isPresented: $showPhoto) {
@@ -187,13 +189,17 @@ struct CapabilityReportView: View {
     let captureNote: String
     let appleRawStatus: String
     let appleRawData: Data?
+    let replayStatus: String
+    let replayData: Data?
     let diagnosticBytes: Int64
     @Binding var recordDiagnostics: Bool
     let canProbe: Bool
     let onProbe: () -> Void
     let onAppleRAW: () -> Void
+    let onReplay: () -> Void
     let onClearRAW: () -> Void
     @State private var showAppleRAW = false
+    @State private var showReplay = false
 
     private var reportText: String {
         var parts: [String] = []
@@ -224,6 +230,11 @@ struct CapabilityReportView: View {
                     Button("Sonda de diagnostico RAW", action: onProbe).disabled(!canProbe)
                     Divider()
                     Text("Laboratorio").font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+                    Button("Reprocessar ultimo burst guardado", action: onReplay).disabled(!canProbe)
+                    Text("Aplica o processamento desta versao aos mesmos RAWs de Foto, sem precisar fotografar novamente.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if !replayStatus.isEmpty { Text(replayStatus).font(.caption) }
+                    if replayData != nil { Button("Ver foto reprocessada") { showReplay = true } }
                     Button("Comparar ultimo RAW com processamento Apple", action: onAppleRAW).disabled(!canProbe)
                     Text("Revela um RAW individual ja guardado, em meia resolucao. A comparacao nao usa o empilhamento nem substitui a foto final.")
                         .font(.caption).foregroundStyle(.secondary)
@@ -243,6 +254,9 @@ struct CapabilityReportView: View {
             .navigationTitle("Ajustes")
             .sheet(isPresented: $showAppleRAW) {
                 CapturedPhotoView(data: appleRawData, title: "Apple · RAW individual")
+            }
+            .sheet(isPresented: $showReplay) {
+                CapturedPhotoView(data: replayData, title: "Burst reprocessado")
             }
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

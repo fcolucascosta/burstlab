@@ -48,6 +48,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private(set) var lastPhotoData: Data?
     @Published var appleRawStatus = ""
     @Published var appleRawReferenceData: Data?
+    @Published var replayStatus = ""
+    @Published var replayData: Data?
 
     let session = AVCaptureSession()
 
@@ -164,6 +166,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                         self.diagnosticNote = "Diagnosticos apagados."
                         self.appleRawReferenceData = nil
                         self.appleRawStatus = ""
+                        self.replayData = nil
+                        self.replayStatus = ""
                     }
                 }
             } catch {
@@ -263,6 +267,37 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     }
                 }
                 self.completeBurstProcessing()
+            }
+        }
+    }
+
+    func replayStoredPhoto() {
+        sessionQueue.async {
+            guard self.configured, !self.burstActive, !self.processingActive,
+                  !self.singleCaptureActive, !self.probeActive else { return }
+            self.processingActive = true
+            DispatchQueue.main.async {
+                self.isCapturingBurst = true
+                self.replayData = nil
+                self.replayStatus = "Reprocessando o burst guardado..."
+                self.status = "Reprocessando..."
+            }
+            self.processingQueue.async {
+                do {
+                    let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                                                appropriateFor: nil, create: false)
+                    let directory = try BurstAppleRAWReference.latestDirectory(in: documents)
+                    let data = try BurstStoredPhotoReplay.run(directory: directory)
+                    DispatchQueue.main.async {
+                        self.replayData = data
+                        self.replayStatus = "Reprocessamento pronto. Os RAWs e a foto original foram preservados."
+                        self.status = "Reprocessamento pronto"
+                    }
+                } catch {
+                    DispatchQueue.main.async { self.replayStatus = error.localizedDescription; self.status = "Reprocessamento indisponivel" }
+                }
+                self.completeBurstProcessing()
+                self.refreshDiagnosticStorage()
             }
         }
     }

@@ -15,6 +15,7 @@ SOURCES = [
     "Apple/CameraPreview.swift",
     "Apple/BurstPreviewSampler.swift",
     "Apple/BurstAppleRAWReference.swift",
+    "Apple/BurstStoredPhotoReplay.swift",
     "Shared/BurstConfig.swift",
     "Shared/BurstFusion.swift",
     "Shared/BurstToneMap.swift",
