@@ -1,4 +1,12 @@
-# Captura noturna apoiada (0.4.0 / 0.5.0)
+# Captura noturna apoiada (0.7.0)
+
+## Errata: callbacks nao sao exposicoes independentes
+
+A auditoria dos arquivos revelou2RAWs distintos em16callbacks nos ensaios038F22AF(0.4.0),815918B9(0.4.1),94F7E771/34434B9B(0.6.0). Grupos de6-10arquivos tinham SHA256 identico. Um controle Foto0.4.1 tinha8arquivos distintos. Portanto, a soma de16EXIFs de0,5s nao comprovava8s de integracao independente; as estimativas de ruido que tratavam esses16arquivos como amostras independentes ficam invalidadas. A igualdade byte a byte e evidencia de repeticao, nao uma estimativa estatistica.
+
+A0.7.0 limita a cadencia dos pedidos de Noite/Longa pela duracao anterior+50ms, em vez de seguir a velocidade do callback. Antes de aceitar qualquer RAW, verifica SHA256 dos pixels sem padding e timestamp de foto crescente. Repeticoes nao avancam o contador; ha ate3tentativas por posicao e cancelamento explicito se persistirem, alem do timeout global. A politica Foto mantem pedidos rapidos, com a mesma verificacao de identidade. Hashes distintos ainda nao demonstram ruido temporal independente ou melhor SNR; o proximo ensaio precisa conferir os16hashes e espacamento dos timestamps no SE.
+
+Manifest schema4 registra pixel_sha256 por arquivo, unique_pixel_frames, repeated_or_stale_raw_rejections, photo_timestamp_seconds, accepted_photo_timestamp_span_seconds e unique_frame_exposure_sum_seconds. O ultimo campo soma EXIF somente de imagens aceitas; nao mede exposicao continua nem inclui intervalos. O nome anterior measured_integration_seconds foi removido para evitar essa interpretacao. O primeiro grupo corrigido ainda precisa de readback fisico.
 
 A 0.3.3 sempre usava o modo Foto: oito RAWs com obturador/ISO derivados do preview. No ensaio noturno recebido, o DNG tinha ISO640 e1/43s, aproximadamente0,19s somados sob a trava de exposicao. Processar por13s nao acrescentou luz capturada. Os modos Noite/Longa existentes na configuracao nao estavam ligados ao app.
 
@@ -22,7 +30,7 @@ Conferir ISO/tempo efetivos, alinhamento, ruido/detalhe, realces, cores, tempo d
 
 ## Realces e acabamento (0.4.1 / 0.5.0)
 
-A 0.4.1 permite ao mapa local reduzir iluminacao forte, alem de elevar sombras, e usa shoulder racional para manter mais degraus claros no JPEG8bit. Isso nao recupera informacao ja saturada no RAW. Um ensaio fisico 0.4.0 confirmou 16 exposicoes de0,5s/ISO32, oito segundos somados; o primeiro RAW tinha aproximadamente0,93% de amostras no branco do sensor. O usuario relatou melhora noturna e realces ainda excessivos.
+A 0.4.1 permite ao mapa local reduzir iluminacao forte, alem de elevar sombras, e usa shoulder racional para manter mais degraus claros no JPEG8bit. Isso nao recupera informacao ja saturada no RAW. O ensaio0.4.0 tinha16callbacks com EXIF0,5s/ISO32, mas apenas2RAWs distintos conforme a auditoria acima; nao comprovava8s de integracao independente. O primeiro RAW tinha aproximadamente0,93% de amostras no branco do sensor. O usuario relatou melhora noturna e realces ainda excessivos.
 
 A 0.5.0 mede realces no primeiro RAW de Noite: se pelo menos0,05% das amostras esparsas estiverem perto do branco, indices3/7/11/15 passam a usar exposicao ate16vezes mais curta, ao mesmo ISO. Sao12longas+4curtas; com0,5s e1/32s, a integracao planejada cai de8 para6,125s. Sem realces relevantes, mantem16longas. Foto e Longa conservam suas politicas.
 

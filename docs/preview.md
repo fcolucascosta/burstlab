@@ -1,4 +1,4 @@
-# Preview como referencia (0.6.0)
+# Preview como referencia (0.6.0 / 0.7.0)
 
 O retorno do usuario define o objetivo: preservar a aparencia observada no preview, com melhor detalhe e menos ruido no JPEG. Um material preto deve permanecer preto; o brilho medio da cena nao permite distinguir tinta preta de uma sombra. O medidor anterior procurava uma media logaritmica de 0,18 e o mapa local podia elevar ainda mais os escuros, destacando ruido.
 
@@ -18,9 +18,17 @@ Testes verificam materiais escuros, tons medios, monotonicidade, preservacao de 
 
 Esta revisao nao adiciona blur de luma nem sharpening. Reduzir elevacao indevida dos pretos pode reduzir a visibilidade do ruido, mas nao demonstra reducao do ruido do sensor/merge. O ensaio do notebook usava Foto, oito frames de aproximadamente 1/33s, ISO640. O ensaio noturno mais recente tem 16 frames de 0,5s, ISO160. Regioes RAW apresentam discrepancias diferentes em relacao ao NoiseProfile, e movimento/flicker podem contaminar a estimativa: nao ha justificativa para aumentar indiscriminadamente o denoise ou aceitar mais movimento no merge.
 
+**Errata da auditoria de0.7.0:** os16arquivos desse ensaio noturno representam apenas2RAWs distintos. As estimativas temporais de ruido da noite nao devem ser interpretadas como amostras independentes; o controle Foto do notebook tem8RAWs distintos. Ver [cadencia e identidade](night.md). Contar callbacks e somar EXIF nao mede integracao independente.
+
+## Cor e ordem das operacoes (0.7.0)
+
+Os ensaios0.6.0 de quarto e tecido confirmaram uso do proxy: correlacoes0,9755/0,9640 e ajuste mediano de-2,31/-2,82EV. Contudo, o tecido laranja aparecia esbranquicado. Nenhuma amostra atingiu16380 em qualquer um dos16RAWs do tecido. A perda surgia no acabamento: o primeiro gamut fit, feito ainda com brilho alto, reduzia cor em direcao ao branco; baixar brilho depois nao recuperava essa cromaticidade.
+
+A0.7.0 calcula a luminancia de saida incluindo a curva de preview antes de fazer um unico gamut fit, usando o RGB linear original. Preserva o acabamento anterior quando nao ha referencia. O replay na mesma entrada real (media dos RAWs e CFA2x2, sem merge robusto/MHC/filtro cromatico completo) recupera o laranja sem mudanca relevante de luminancia na regiao. Um teste do operador de producao verifica uma cor quente acima do branco SDR que deve manter suas proporcoes RGB quando o brilho final permite. Nao houve ajuste direcionado ao matiz laranja nem mudanca de saturacao/denoise. A captura final0.7.0 precisa ser comparada no aparelho.
+
 ## Readback e reversao
 
-Com Guardar RAWs para comparacao, o manifest schema3 inclui preview_reference (dimensoes/luminancias) e preview.rgba8 sRGB sem rotacao. processing.json inclui preview_available, preview_tone_used, preview_contrast_curve_used, preview_scene_correlation e preview_median_correction_ev. Uma correlacao zero com preview_tone_used=1 e preview_contrast_curve_used=0 indica ganho para cena uniforme, nao uma correlacao medida perfeita.
+Com Guardar RAWs para comparacao, o manifest inclui preview_reference (dimensoes/luminancias) e preview.rgba8 sRGB sem rotacao (schema3 na0.6.0; schema4 com identidade/cadencia na0.7.0). processing.json inclui preview_available, preview_tone_used, preview_contrast_curve_used, preview_scene_correlation e preview_median_correction_ev. Uma correlacao zero com preview_tone_used=1 e preview_contrast_curve_used=0 indica ganho para cena uniforme, nao uma correlacao medida perfeita.
 
 Comparar a mesma cena com corpo preto, tela e parede, em Foto e Noite apoiado. Conferir a amostra armazenada antes de avaliar a curva. Arquivos antigos continuam sem proxy e nao permitem reconstruir o preview original. Para reverter somente este experimento, reinstalar o IPA 0.5.0 preservado em build/dist; 0.4.1 e a referencia fisica recebida, mas tambem remove o bracket de realces.
 

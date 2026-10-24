@@ -43,6 +43,9 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 
 ## F4 - Modos
 
+- [x] Auditoria0.7.0 identificou duplicatas RAW em Noite e implementou cadencia/verificacao por pixels e timestamps.
+- [ ] Confirmar16RAWs distintos e espacamento temporal no SE antes de tratar soma EXIF como exposicoes independentes.
+
 - [x] Noite em tripe:16frames, obturador ate0,5s, troca ISO por tempo ao mesmo produto solicitado e fusao robusta (0.4.0). Validacao fisica pendente.
 - [x] Longa em tripe:16frames, acumulacao alinhada com pesos iguais normalizada, para rastros (0.4.0). Validacao fisica pendente.
 - [ ] Noite na mao, deteccao automatica de estabilidade e politica de movimento/numero de frames.
@@ -51,6 +54,9 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 Detalhes e limites em [Noite e longa exposicao](night.md). Ate0.3.3, defaults Noite/Longa nao estavam conectados a captura: o app sempre acionava Foto. O primeiro ensaio noturno recebeu aproximadamente0,19s de exposicao somada, apesar de13s de processamento. Esta lacuna nao era resolvida por ajustes de cor/denoise.
 
 ## F5 - UX pro
+
+- [x] Enquadramento4:3, foco/exposicao por toque, grade, obturador/modos e revisao da ultima foto (0.7.0); layout revisado em simulador SE, foco fisico pendente.
+- [x] Comparacao sob demanda do ultimo DNG com CIRAWFilter Apple e registro do decoder efetivo (0.7.0); [protocolo](apple-raw.md), validacao fisica pendente.
 
 - Controles manuais (ISO, tempo, foco, WB, EV, no de frames).
 - Ferramentas do viewfinder (histograma, zebra, nivel, loupe) e filmstrip.

@@ -4,9 +4,12 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual (0.6.0):** Foto usa 8 RAWs; Noite/Longa usam 16 e ate 0,5 s/frame em tripe. Noite pode intercalar quatro exposicoes curtas para realces e combina as duas exposicoes antes do demosaic. O acabamento passa a consultar uma amostra SDR do preview para orientar brilho/contraste, preservando materiais escuros em vez de leva-los indiscriminadamente ao cinza medio. O preview nao fornece os pixels da foto final. A captura longa foi confirmada em ensaios anteriores; a nova referencia de preview e o bracket HDR ainda exigem readback e comparacao fisica. Ruido, registro local/subpixel, Noite na mao, termica/memoria e gain map HDR continuam exigindo trabalho; build nao aprova qualidade fotografica.
+**Estado atual (0.7.0):** interface de camera com enquadramento4:3, toque para foco/exposicao, grade e revisao da ultima foto. Foto solicita8RAWs; Noite/Longa16 com ate0,5s/frame. A auditoria encontrou somente2RAWs distintos em16callbacks noturnos de0.4.0/0.4.1/0.6.0: a duracao EXIF nao comprovava exposicoes independentes. A captura passa a respeitar a cadencia do sensor, rejeitar pixels/timestamps repetidos e registrar identidade de cada RAW. O acabamento do preview agora precede a compressao final de gamut, evitando perder cor antes de ajustar brilho; o tecido laranja foi reprocessado offline com a mesma entrada. Ha uma comparacao opcional com o revelador publico Apple/CIRAWFilter. Qualidade,16frames unicos, foco fisico, HDR e uso de decoder neural no SE ainda exigem readback; build nao aprova qualidade fotografica.
 
 ## Documentacao
+
+- [Interface e foco por toque](docs/camera-ui.md).
+- [Revelador Apple e pesquisa de ML](docs/apple-raw.md).
 
 - [Preview como referencia do acabamento](docs/preview.md): contraste, preservacao dos pretos, fallback e readback.
 

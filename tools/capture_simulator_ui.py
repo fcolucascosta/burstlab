@@ -30,7 +30,7 @@ def main():
         # simctl launch returns before the first scene is drawn. Wait via the
         # simulator process, not a fixed multi-minute sleep on the agent.
         import time
-        time.sleep(3)
+        time.sleep(10)
         run("xcrun", "simctl", "io", device, "screenshot", str(destination))
         print("Actual SE2022 simulator UI saved:", destination)
     finally:
