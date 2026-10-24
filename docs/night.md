@@ -26,7 +26,7 @@ Ha dois segundos para estabilizar o tripe apos tocar. AE/AF/WB precisam convergi
 
 ## Como testar
 
-Selecionar **Noite**, apoiar o aparelho e acionar o obturador principal em uma cena parada. Para o efeito de rastros, selecionar **Longa**. Esses modos exigem tripe; nao ha deteccao automatica de estabilidade nem politica noturna para uso na mao. Guardar RAWs adiciona cerca de420MB por captura e deve ficar ligado nos ensaios. O manifest registra modo, plano, merge e exposicao/ISO EXIF por frame quando disponiveis; a soma medida e emitida somente se todas as duracoes estiverem presentes.
+Selecionar **Noite**, apoiar o aparelho e acionar o obturador principal em uma cena parada. Para rastros, selecionar **Longa**. Esses modos exigem tripe; nao ha deteccao automatica de estabilidade nem politica noturna para uso na mao. Para um ensaio, ativar **Guardar RAWs so da proxima foto**; na0.8.0 desliga no disparo,substitui o ensaio anterior e fica sujeito ao limite512MiB/prazo24h aplicado no uso do app. O manifest registra modo,plano,merge e exposicao/ISO EXIF por frame quando disponiveis; a soma medida e emitida somente se todas as duracoes estiverem presentes.
 
 Conferir ISO/tempo efetivos, alinhamento, ruido/detalhe, realces, cores, tempo de captura/processamento, termica e pico de memoria. Os16RAWs retidos ocupam390MB antes dos demais buffers. Testes numericos e build nao aprovam qualidade noturna; o bracket0.5.0 e o acabamento0.6.0 ainda precisam de teste fisico.
 

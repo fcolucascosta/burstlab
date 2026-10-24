@@ -28,7 +28,7 @@ A0.7.0 calcula a luminancia de saida incluindo a curva de preview antes de fazer
 
 ## Readback e reversao
 
-Com Guardar RAWs para comparacao, o manifest inclui preview_reference (dimensoes/luminancias) e preview.rgba8 sRGB sem rotacao (schema3 na0.6.0; schema4 com identidade/cadencia na0.7.0). processing.json inclui preview_available, preview_tone_used, preview_contrast_curve_used, preview_scene_correlation e preview_median_correction_ev. Uma correlacao zero com preview_tone_used=1 e preview_contrast_curve_used=0 indica ganho para cena uniforme, nao uma correlacao medida perfeita.
+Com **Guardar RAWs so da proxima foto**, o manifest inclui preview_reference (dimensoes/luminancias) e preview.rgba8 sRGB sem rotacao (schema3 na0.6.0;schema4 com identidade/cadencia na0.7.0;schema5 com orcamento adaptativo na0.8.0). O diagnostico substitui o anterior e expira; ver diagnostic-storage.md. processing.json inclui preview_available,preview_tone_used,preview_contrast_curve_used,preview_scene_correlation e preview_median_correction_ev. Uma correlacao zero com preview_tone_used=1 e preview_contrast_curve_used=0 indica ganho para cena uniforme,nao uma correlacao medida perfeita.
 
 Comparar a mesma cena com corpo preto, tela e parede, em Foto e Noite apoiado. Conferir a amostra armazenada antes de avaliar a curva. Arquivos antigos continuam sem proxy e nao permitem reconstruir o preview original. Para reverter somente este experimento, reinstalar o IPA 0.5.0 preservado em build/dist; 0.4.1 e a referencia fisica recebida, mas tambem remove o bracket de realces.
 

@@ -25,13 +25,15 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 
 ## F2 - Nucleo de burst (v1 implementada; validacao no aparelho pendente)
 
-- [x] Captura de 8 frames RAW com exposicao constante (exposicao customizada, -0,5 EV) e foco travado.
+- [x] Captura RAW com exposicao constante (exposicao customizada,-0,5EV) e foco travado; Foto0.8.0 seleciona12/16/20frames pelo sinal/modelo de ruido do primeiro RAW, com prioridade de qualidade e limite de payload. Readback fisico da adaptacao pendente.
 - [x] Alinhamento por projecoes (translacao inteira, arredondada para par); media inicial substituida por fusao por frequencia na 0.2.9.
 - [x] Demosaic Malvar-He-Cutler, transformacao de cor DNG com WB alternativo, normalizacao global de exposicao, denoise espacial e JPEG na fototeca.
 - Memoria calculada: 24,4 MB/frame; os 8 RAW retidos ja ocupam 195 MB. Bayer merged = 24,4 MB, RGB = 36,6 MB; denoise e rotacao adicionam buffers. A 0.2.9 reutiliza os buffers FFT e acumula uma fase CFA por vez; remove os acumuladores/contagens inteiros anteriores, mas mantem os 8 RAW. Pico residente ainda nao medido e o antigo alvo de 150 MB continua excedido so pelos frames retidos.
 - [ ] Validacao no aparelho: SNR em sombras vs frame unico, ghosting, cores, latencia e pico de memoria.
 - [x] Merge por frequencia com referencia privilegiada e limiar guiado por ruido (0.2.9); teste numerico e replay real, aceite fisico pendente.
-- [ ] Alinhamento local/subpixel/piramide, selecao da ancora e medida das contribuicoes efetivas.
+- [x] Refinamento local par em guia verde e acabamento espectral guiado pela variancia residual (Foto0.8.0); testes/replay, aceite fisico pendente. Ver [ajuste diurno](daylight-quality.md).
+- [ ] Alinhamento subpixel/piramide, selecao da ancora e medida das contribuicoes efetivas.
+- Foto0.8.0 pode reter487710720bytes so nos20RAWs; isso e um orcamento de payload, nao pico residente medido. Continua necessario medir memoria/termica no SE.
 
 ## F3 - Look natural
 
@@ -57,6 +59,7 @@ Detalhes e limites em [Noite e longa exposicao](night.md). Ate0.3.3, defaults No
 
 - [x] Enquadramento4:3, foco/exposicao por toque, grade, obturador/modos e revisao da ultima foto (0.7.0); layout revisado em simulador SE, foco fisico pendente.
 - [x] Comparacao sob demanda do ultimo DNG com CIRAWFilter Apple e registro do decoder efetivo (0.7.0); [protocolo](apple-raw.md), validacao fisica pendente.
+- [x] Icone e diagnostico descartavel: proxima foto apenas, limite512MiB, prazo24h aplicado no uso do app, migracao e limpeza nos Ajustes (0.8.0). [Ciclo dos RAWs](diagnostic-storage.md); readback automatico no aparelho pendente.
 
 - Controles manuais (ISO, tempo, foco, WB, EV, no de frames).
 - Ferramentas do viewfinder (histograma, zebra, nivel, loupe) e filmstrip.

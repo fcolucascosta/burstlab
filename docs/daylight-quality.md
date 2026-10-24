@@ -18,6 +18,14 @@ Guia pela media dos dois verdes de cada quad CFA. Um deslocamento residual e sel
 
 Sinalizacao no manifest schema5 registra a decisao de frames; processing.json registra blocos refinados/totais e forca residual. Custo do alinhamento entra no tempo de processamento existente. Picos de memoria/termica e qualidade instalada precisam ser medidos no SE. Testes e replays nao substituem comparacao fisica em enquadramento equivalente.
 
+## Readback da entrega
+
+Aplicacao db01aa0; Actions PR40103110151:84testes Swift,9testes de empacotamento e amostrador real de preview passaram, assim como builds de simulador/device e screenshot SE. IPA0.8.0 unsigned verificado localmente:SHA256 `88023731b1531bc19949c3ab3f91aeaeb2d1f3b96a216e9fa367ff268705bd54`,arm64 iPhoneOS,familia[1],sem assinatura/mobileprovision,manifest consistente. Catalogo compilado,icone60x60@2x e CFBundleIcons presentes. As versoes anteriores em build/dist foram preservadas.
+
+O replay independente com as equacoes de renderizacao inclui MHC inteiro, ajuste de gamut, transferencia/LUT, filtro cromatico e look. Mantem o tom de referencia aproximado a partir do frame0 e aplica deslocamento constante por patch como o operador nativo, com amostragem64pontos no matcher. Usa os mesmos8RAWs reais: nao fabrica os12/20frames do proximo teste. No recorte do telhado, a mediana de luma em bytes ficou85,819->85,802->85,947 para baseline,alinhamento e alinhamento+filtro residual; na rua201,092->201,103->201,103. Recortes em100% foram conferidos; nao ha referencia limpa para calcular qualidade absoluta. O replay de contagem escolhe12para as duas cenas externas e20para os dois enquadramentos com sombras fortes.
+
+Todos os32hashes dos RAWs diurnos conferem com os manifests. Depois da copia, foram removidos somente esses quatro diagnosticos do aparelho:824440076bytes,aproximadamente786MiB. As outras27pastas de ensaios ja estavam vazias. A fototeca nao foi modificada. Provas e scripts de limpeza ficam no relatorio local. O usuario escolheu testar a0.8.0 depois; nao ha captura fisica0.8.0 aprovada nesta entrega.
+
 Referencias primarias: [HDR+2016](https://research.google/pubs/burst-photography-for-high-dynamic-range-and-low-light-imaging-on-mobile-cameras/), [analise IPOL2021](https://www.ipol.im/pub/art/2021/336/), [motion metering2019](https://research.google/pubs/handheld-mobile-photography-in-very-low-light/), [super-resolucao2019](https://research.google/pubs/handheld-multi-frame-super-resolution/). Implementacao propria das equacoes; nenhum codigo AGPL foi incorporado ao app.
 
 Reversao: voltar aos artefatos preservados0.7.0 para a fusao anterior. O commit do ajuste diurno pode ser revertido separadamente dos commits de armazenamento/icone. A reversao nao recupera RAWs de diagnostico que tenham expirado.

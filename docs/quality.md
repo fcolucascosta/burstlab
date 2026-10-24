@@ -59,7 +59,7 @@ Nao tratar um aumento de saturacao como correcao de erros upstream. Avaliar o aj
 
 ## Coleta reproduzivel
 
-No painel de informacoes, ativar **Guardar RAWs para comparacao** apenas para os ensaios. O app preserva os oito buffers originais com stride, um DNG de referencia quando disponivel e um manifest. A escrita ocorre depois da captura. Os arquivos ficam em **Arquivos > No Meu iPhone > BurstLab > Ensaios**; ocupam aproximadamente 220 MB por burst e podem ser copiados para o computador. A opcao e desligada por padrao. Um diretorio sem manifest e uma coleta incompleta. Nao e necessario publicar fotos no repositorio.
+Nos Ajustes0.8.0, ativar **Guardar RAWs so da proxima foto** apenas para um ensaio. Os12/16/20buffers originais de Foto (16em Noite/Longa),DNG e manifest sao gravados depois da captura em Arquivos > No Meu iPhone > BurstLab > Ensaios. O ensaio substitui o anterior, tem limite512MiB e expira ao usar o app depois de24h; ha botao de limpeza. A opcao desliga no disparo ou ao sair do app e nao persiste entre sessoes. Copiar o ensaio antes do proximo; nao publicar fotos no repositorio. Ver diagnostic-storage.md.
 
 Capturar as mesmas cenas com a camera padrao, mesmo ponto de vista, luz estavel e lente limpa. Fazer pelo menos tres repeticoes por condicao:
 
