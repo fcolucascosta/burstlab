@@ -85,7 +85,10 @@ final class BurstPreviewToneTests: XCTestCase {
     }
 
     func testVideoAspectCropUsesCommonSensorField() throws {
-        let source = (0..<(72 * 54)).map { i in 0.01 + 0.8 * Double(i / 72) / 53 }
+        let source: [Double] = (0..<3888).map { i -> Double in
+            let row = Double(i / 72) / 53.0
+            return 0.01 + 0.8 * row
+        }
         // A centered 16:9 video view of a 4:3 photo sensor.
         let video = Array(source[(7 * 72)..<(47 * 72)])
         let curve = try XCTUnwrap(BurstPreviewTone(rendered: source, width: 72, height: 54,
