@@ -13,6 +13,7 @@ SOURCES = [
     "Apple/BurstProcessor.swift",
     "Apple/BurstDiagnostics.swift",
     "Apple/CameraPreview.swift",
+    "Apple/BurstPreviewSampler.swift",
     "Shared/BurstConfig.swift",
     "Shared/BurstFusion.swift",
     "Shared/BurstToneMap.swift",
@@ -20,6 +21,7 @@ SOURCES = [
     "Shared/BurstColorLook.swift",
     "Shared/BurstCapturePlan.swift",
     "Shared/BurstHDR.swift",
+    "Shared/BurstPreviewTone.swift",
 ]
 
 
@@ -111,7 +113,7 @@ def generate():
         "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
         "CFBundlePackageType": "APPL",
         "CFBundleInfoDictionaryVersion": "6.0",
-        "CFBundleShortVersionString": "0.5.0",
+        "CFBundleShortVersionString": "0.6.0",
         "CFBundleVersion": "1",
         "NSCameraUsageDescription": "BurstLab usa a camera para capturar e processar fotos computacionais.",
         "NSPhotoLibraryAddUsageDescription": "BurstLab salva as fotos capturadas na sua fototeca.",

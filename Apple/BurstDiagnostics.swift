@@ -19,7 +19,7 @@ enum BurstDiagnostics {
 
     static func save(frames: [BurstFrame], referenceDNG: Data?, rotation: Int,
                      neutral: [Double]?, transform: [Double]?, config: BurstConfig,
-                     plan: BurstCapturePlan?, exposureReadings: [[String: Double]]) throws -> URL {
+                     plan: BurstCapturePlan?, exposureReadings: [[String: Double]], preview: BurstPreviewSample?) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,
                                                    in: .userDomainMask, appropriateFor: nil, create: true)
         let directory = documents.appendingPathComponent("Ensaios", isDirectory: true)
@@ -36,7 +36,7 @@ enum BurstDiagnostics {
             try referenceDNG.write(to: directory.appendingPathComponent("reference.dng"), options: .atomic)
         }
         var manifest: [String: Any] = [
-            "schema_version": 2,
+            "schema_version": 3,
             "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
             "created_at": ISO8601DateFormatter().string(from: Date()),
             "pixel_format": "rgg4", "storage": "little-endian UInt16, row stride included",
@@ -52,6 +52,13 @@ enum BurstDiagnostics {
         ]
         if let neutral { manifest["as_shot_neutral"] = neutral }
         if let transform { manifest["camera_to_linear_srgb"] = transform }
+        if let preview {
+            // Same bytes and luminances used by rendering; opt-in, local only.
+            try preview.rgba.write(to: directory.appendingPathComponent("preview.rgba8"), options: .atomic)
+            manifest["preview_reference"] = ["width": preview.reference.width, "height": preview.reference.height,
+                "luminances": preview.reference.luminances, "file": "preview.rgba8",
+                "encoding": "SDR sRGB RGBA8, unrotated video proxy; not a screen screenshot"] as [String: Any]
+        }
         if let plan {
             manifest["capture_plan"] = ["duration_seconds": plan.duration, "iso": plan.iso,
                                         "integration_seconds": plan.integrationSeconds,

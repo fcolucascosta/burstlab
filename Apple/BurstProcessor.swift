@@ -51,7 +51,8 @@ enum BurstProcessor {
         colorTransform: [Double]? = nil,
         noiseProfile: [Double]? = nil,
         usesRobustMerge: Bool = true,
-        highlightFrames: [Int] = [], exposureProducts: [Double]? = nil
+        highlightFrames: [Int] = [], exposureProducts: [Double]? = nil,
+        previewReference: BurstPreviewReference? = nil
     ) throws -> BurstProcessResult {
         guard let reference = frames.first else { throw BurstError.noFrames }
         let width = reference.width
@@ -220,6 +221,14 @@ enum BurstProcessor {
         let exposureScale = Float(meter.scale)
         let scaleD = meter.scale
         let tone = try BurstToneMap(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth, height: toneHeight)
+        let previewTone = previewReference.flatMap { preview -> BurstPreviewTone? in
+            let rendered = thumbnail.indices.map { i -> Double in
+                let y = thumbnail[i] * scaleD
+                return BurstToneMap.render(red: y, green: y, blue: y,
+                    gain: tone.gain(x: Double(i % toneWidth), y: Double(i / toneWidth))).0
+            }
+            return BurstPreviewTone(rendered: rendered, width: toneWidth, height: toneHeight, reference: preview)
+        }
         let meteredAt = CFAbsoluteTimeGetCurrent()
         func gammaIndex(_ value: Double) -> Int {
             let clamped = min(max(value, 0), 1)
@@ -296,8 +305,9 @@ enum BurstProcessor {
                 let linear = linearRGB(red, green, blue)
                 let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
                                      y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
-                let rendered = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
+                let base = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
                                                    blue: linear.2 * scaleD, gain: gain)
+                let rendered = previewTone?.apply(red: base.0, green: base.1, blue: base.2) ?? base
                 rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
                 rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
                 rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]
@@ -377,6 +387,10 @@ enum BurstProcessor {
             exposureMeter: ["median_linear_luminance": meter.median, "log_average": meter.logAverage,
                             "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
                             "adjustment_over_luminance_median_ev": meter.adjustmentEV,
+                            "preview_available": previewReference == nil ? 0 : 1,
+                            "preview_tone_used": previewTone == nil ? 0 : 1,
+                            "preview_scene_correlation": previewTone?.correlation ?? 0,
+                            "preview_median_correction_ev": previewTone?.medianCorrectionEV ?? 0,
                             "hdr_exposure_ratio": hdrRatio ?? 1,
                             "hdr_blended_cells": Double(hdrStats.blendedCells),
                             "hdr_motion_rejected_cells": Double(hdrStats.motionRejectedCells),

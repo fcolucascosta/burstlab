@@ -33,7 +33,7 @@ struct CaptureCapabilities: Equatable {
     }
 }
 
-final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate {
+final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureDelegate, AVCaptureVideoDataOutputSampleBufferDelegate {
     @Published var status = "Iniciando..."
     @Published var capabilities: CaptureCapabilities?
     @Published var lastCaptureNote = ""
@@ -46,6 +46,12 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     let session = AVCaptureSession()
 
     private let photoOutput = AVCapturePhotoOutput()
+    private let previewOutput = AVCaptureVideoDataOutput()
+    private let previewSampler = BurstPreviewSampler()
+    // All preview state and callbacks are serialized on sessionQueue.
+    private var latestPreview: BurstPreviewSample?
+    private var burstPreview: BurstPreviewSample?
+    private var lastPreviewSampleTime: CFAbsoluteTime = 0
     private let sessionQueue = DispatchQueue(label: "dev.lucas.burstlab.session")
     private let processingQueue = DispatchQueue(label: "dev.lucas.burstlab.processing", qos: .userInitiated)
     private let burstLog = Logger(subsystem: "dev.lucas.burstlab", category: "burst")
@@ -122,6 +128,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             if self.probeActive { self.finishRawProbe(status: "Sonda interrompida ao fechar a camera.") }
             self.requests.removeAll()
             self.singleCaptureActive = false
+            self.latestPreview = nil
             if self.session.isRunning {
                 self.session.stopRunning()
             }
@@ -165,8 +172,27 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
         session.addOutput(photoOutput)
         photoOutput.maxPhotoQualityPrioritization = .quality
+        previewOutput.alwaysDiscardsLateVideoFrames = true
+        previewOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        if session.canAddOutput(previewOutput) {
+            session.addOutput(previewOutput)
+            previewOutput.setSampleBufferDelegate(self, queue: sessionQueue)
+            if #available(iOS 17.0, *), let connection = previewOutput.connection(with: .video),
+               connection.isVideoRotationAngleSupported(0) { connection.videoRotationAngle = 0 }
+        }
         session.commitConfiguration()
         configured = true
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        guard !burstActive, !processingActive, !probeActive, !singleCaptureActive,
+              CFAbsoluteTimeGetCurrent() - lastPreviewSampleTime >= 0.25,
+              let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // Reject a queued video frame from before a session interruption.
+        let age = CMTimeGetSeconds(CMClockGetTime(CMClockGetHostTimeClock()) - CMSampleBufferGetPresentationTimeStamp(sampleBuffer))
+        guard age.isFinite, age >= -0.1, age <= 0.5 else { return }
+        lastPreviewSampleTime = CFAbsoluteTimeGetCurrent()
+        latestPreview = previewSampler.sample(buffer)
     }
 
     private func publishCapabilities() {
@@ -398,6 +424,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             let rawFormat = kCVPixelFormatType_14Bayer_RGGB
             guard self.photoDevice != nil else { return }
             self.burstConfig = BurstConfig.defaults(for: mode)
+            self.burstPreview = self.latestPreview.flatMap {
+                CFAbsoluteTimeGetCurrent() - $0.timestamp <= 0.75 ? $0 : nil
+            }
             self.burstActive = true
             self.burstGeneration = UUID()
             let generation = self.burstGeneration
@@ -708,6 +737,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         let noiseProfile = burstNoiseProfile
         let recordDiagnostics = burstRecordDiagnostics
         let referenceDNG = burstReferenceDNG
+        let preview = burstPreview
+        burstPreview = nil
         burstReferenceDNG = nil
         let matrix1 = burstColorMatrix1
         let matrix2 = burstColorMatrix2
@@ -745,7 +776,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     let directory = try BurstDiagnostics.save(frames: frames, referenceDNG: referenceDNG,
                                                               rotation: rotationAngle, neutral: asShotNeutral,
                                                               transform: colorTransform, config: config, plan: plan,
-                                                              exposureReadings: exposureReadings)
+                                                              exposureReadings: exposureReadings, preview: preview)
                     diagnosticDirectory = directory
                     DispatchQueue.main.async {
                         self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
@@ -763,7 +794,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     colorTransform: colorTransform,
                     noiseProfile: noiseProfile,
                     usesRobustMerge: config.usesRobustMerge,
-                    highlightFrames: highlightFrames, exposureProducts: exposureProducts
+                    highlightFrames: highlightFrames, exposureProducts: exposureProducts,
+                    previewReference: preview?.reference
                 )
                 if let directory = diagnosticDirectory {
                     do {

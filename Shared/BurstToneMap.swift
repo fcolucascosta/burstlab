@@ -62,6 +62,10 @@ public struct BurstToneMap {
         // previous exponential shoulder when encoding to an 8-bit JPEG.
         let excess = max(lifted - 0.65, 0)
         let output = lifted <= 0.65 ? lifted : 0.65 + 0.35 * excess / (excess + 0.35)
+        return fitGamut(red: red, green: green, blue: blue, luminance: luminance, output: output)
+    }
+
+    static func fitGamut(red: Double, green: Double, blue: Double, luminance: Double, output: Double) -> (Double, Double, Double) {
         let scale = output / luminance
         // Gamut compression here; perceptual chroma follows denoising later.
         let dr = red * scale - output
