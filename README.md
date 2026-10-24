@@ -4,9 +4,11 @@ App proprio inspirado no pipeline do Project Indigo (Adobe Nextcam). Nao e um by
 
 **Alvo:** iPhone SE 2022 (`iPhone14,6`), A15, 4 GB de RAM, camera unica de 12 MP (wide), iOS 27.
 
-**Estado atual (0.4.0):** Foto usa 8 RAWs; Noite e Longa sao modos explicitos de tripe com 16 RAWs e obturador de ate 0,5 s/frame, priorizando ISO baixo. Noite usa fusao robusta; Longa inclui movimento na acumulacao alinhada normalizada. O obturador principal respeita o modo selecionado. O ensaio noturno da 0.3.3 revelou que somente Foto estava ligado, com ISO 640 e 1/43 s no DNG; o acabamento sozinho nao entregava captura noturna. A 0.4.0 ainda requer validacao fisica de ruido/detalhe, tempo, termica e memoria. Alinhamento local/subpixel, Noite na mao, deteccao automatica de tripe e gain map HDR permanecem pendentes.
+**Estado atual (0.6.0):** Foto usa 8 RAWs; Noite/Longa usam 16 e ate 0,5 s/frame em tripe. Noite pode intercalar quatro exposicoes curtas para realces e combina as duas exposicoes antes do demosaic. O acabamento passa a consultar uma amostra SDR do preview para orientar brilho/contraste, preservando materiais escuros em vez de leva-los indiscriminadamente ao cinza medio. O preview nao fornece os pixels da foto final. A captura longa foi confirmada em ensaios anteriores; a nova referencia de preview e o bracket HDR ainda exigem readback e comparacao fisica. Ruido, registro local/subpixel, Noite na mao, termica/memoria e gain map HDR continuam exigindo trabalho; build nao aprova qualidade fotografica.
 
 ## Documentacao
+
+- [Preview como referencia do acabamento](docs/preview.md): contraste, preservacao dos pretos, fallback e readback.
 
 - [Noite e longa exposicao em tripe](docs/night.md): politica de captura, uso dos modos e evidencia pendente.
 

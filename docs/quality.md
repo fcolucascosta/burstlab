@@ -51,6 +51,8 @@ Replays de interior, exterior claro e crepusculo usam os mesmos RAWs para compar
 
 ## Limites das comparacoes
 
+Na 0.6.0, o experimento de [referencia do preview](preview.md) trata a elevacao indevida de materiais pretos sem alterar o denoise. Ensaios RAW e comparacoes JPEG/HEIC de notebook e noite ficam em reports/preview-20261023/. Uma referencia mais escura pode reduzir ruido visivel por menor ganho, mas isso nao demonstra menos ruido no merge nem maior resolucao. O proxy real so passa a ser exportado na 0.6.0; fotos antigas nao permitem reconstruir o preview original.
+
 Saturacao HSV media igual a da camera padrao nao demonstra fidelidade ou agradabilidade de cor. Variancia do Laplaciano pode crescer com ruido ou sharpening; sozinha nao demonstra detalhe. Desvio padrao de um recorte pode misturar textura, gradiente de iluminacao e ruido. Comparacoes entre JPEGs com enquadramento/exposicao diferentes sao exploratorias, nao criterios de aprovacao.
 
 Nao tratar um aumento de saturacao como correcao de erros upstream. Avaliar o ajuste de look separadamente da calibracao e nao aumentar o denoise para esconder erros de fusao. Nao dobrar frames automaticamente antes de medir alinhamento e memoria.

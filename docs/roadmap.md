@@ -37,6 +37,9 @@ Cada fase termina com um IPA instalado no SE 2022 e um relatorio de evidencia em
 
 - Mapa local limitado a 1 EV, shoulder e compressao de gamut implementados na 0.3.0; ajuste cromatico experimental 1,15. Aceite fisico pendente; sharpening nao implementado.
 - Comparacao com amostras de referencia.
+- [x] Compressao de iluminacao forte e shoulder racional (0.4.1); bracket de realces Noite (0.5.0), com aceite fisico pendente.
+- [x] Referencia de luminancia/contraste do preview, curva monotona e exportacao do proxy (0.6.0); implementacao e testes, aceite fisico pendente. Ver [preview](preview.md).
+- [ ] Medir ruido/detalhe e correspondencia entre proxy, preview visto e JPEG no aparelho; calibrar diferentes iluminantes e materiais pretos.
 
 ## F4 - Modos
 
