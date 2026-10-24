@@ -27,6 +27,7 @@ SOURCES = [
     "Shared/BurstDiagnosticStorage.swift",
     "Shared/BurstLocalAlignment.swift",
     "Shared/BurstFrameBudget.swift",
+    "Shared/BurstPreviewSpatialTone.swift",
 ]
 
 

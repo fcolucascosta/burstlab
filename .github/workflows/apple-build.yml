@@ -41,7 +41,7 @@ jobs:
         run: python3 -m unittest discover -s tools/tests -v
       - name: Preview sampler color and orientation
         run: |
-          swiftc Shared/BurstToneMap.swift Shared/BurstPreviewTone.swift Apple/BurstPreviewSampler.swift tools/verify_preview_sampler.swift -o build/verify-preview-sampler
+          swiftc Shared/BurstToneMap.swift Shared/BurstPreviewTone.swift Shared/BurstPreviewSpatialTone.swift Apple/BurstPreviewSampler.swift tools/verify_preview_sampler.swift -o build/verify-preview-sampler
           build/verify-preview-sampler
       - name: iOS simulator build
         run: xcodebuild -project BurstLab.xcodeproj -scheme BurstLab-iOS -sdk iphonesimulator -derivedDataPath build/ios-simulator -configuration Debug build CODE_SIGNING_ALLOWED=NO

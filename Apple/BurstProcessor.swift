@@ -226,6 +226,10 @@ enum BurstProcessor {
         let exposureScale = Float(meter.scale)
         let scaleD = meter.scale
         let tone = try BurstToneMap(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth, height: toneHeight)
+        let spatialTone = refinesPhotoDetail ? previewReference.flatMap {
+            BurstPreviewSpatialTone(luminances: thumbnail.map { $0 * scaleD }, width: toneWidth,
+                                    height: toneHeight, reference: $0)
+        } : nil
         let previewTone = previewReference.flatMap { preview -> BurstPreviewTone? in
             let rendered = thumbnail.indices.map { i -> Double in
                 let y = thumbnail[i] * scaleD
@@ -311,7 +315,10 @@ enum BurstProcessor {
                 let gain = tone.gain(x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
                                      y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
                 let rendered = BurstToneMap.render(red: linear.0 * scaleD, green: linear.1 * scaleD,
-                                                   blue: linear.2 * scaleD, gain: gain, previewTone: previewTone)
+                                                   blue: linear.2 * scaleD, gain: gain, previewTone: previewTone,
+                                                   spatialTone: spatialTone,
+                                                   x: (Double(x) + 0.5) / Double(toneBlock) - 0.5,
+                                                   y: (Double(y) + 0.5) / Double(toneBlock) - 0.5)
                 rgbBytes[offset] = gammaTable[gammaIndex(rendered.0)]
                 rgbBytes[offset + 1] = gammaTable[gammaIndex(rendered.1)]
                 rgbBytes[offset + 2] = gammaTable[gammaIndex(rendered.2)]
@@ -395,10 +402,11 @@ enum BurstProcessor {
                             "scale": meter.scale, "legacy_green_scale": legacyExposureScale,
                             "adjustment_over_luminance_median_ev": meter.adjustmentEV,
                             "preview_available": previewReference == nil ? 0 : 1,
-                            "preview_tone_used": previewTone == nil ? 0 : 1,
-                            "preview_contrast_curve_used": previewTone?.usesContrastCurve == true ? 1 : 0,
-                            "preview_scene_correlation": previewTone?.correlation ?? 0,
-                            "preview_median_correction_ev": previewTone?.medianCorrectionEV ?? 0,
+                            "preview_tone_used": spatialTone != nil || previewTone != nil ? 1 : 0,
+                            "preview_spatial_tone_used": spatialTone == nil ? 0 : 1,
+                            "preview_contrast_curve_used": spatialTone == nil && previewTone?.usesContrastCurve == true ? 1 : 0,
+                            "preview_scene_correlation": spatialTone?.correlation ?? previewTone?.correlation ?? 0,
+                            "preview_median_correction_ev": spatialTone?.medianCorrectionEV ?? previewTone?.medianCorrectionEV ?? 0,
                             "hdr_exposure_ratio": hdrRatio ?? 1,
                             "hdr_blended_cells": Double(hdrStats.blendedCells),
                             "hdr_motion_rejected_cells": Double(hdrStats.motionRejectedCells),

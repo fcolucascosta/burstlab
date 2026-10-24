@@ -54,12 +54,14 @@ public struct BurstToneMap {
     }
 
     public static func render(red: Double, green: Double, blue: Double, gain: Double,
-                              previewTone: BurstPreviewTone? = nil) -> (Double, Double, Double) {
+                              previewTone: BurstPreviewTone? = nil,
+                              spatialTone: BurstPreviewSpatialTone? = nil,
+                              x: Double = 0, y: Double = 0) -> (Double, Double, Double) {
         guard red.isFinite, green.isFinite, blue.isFinite, gain.isFinite else { return (0, 0, 0) }
         let luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
         guard luminance > 1e-5 else { return (0, 0, 0) }
         let base = renderedLuminance(luminance, gain: gain)
-        let output = previewTone?.luminance(base) ?? base
+        let output = spatialTone?.luminance(luminance, x: x, y: y) ?? previewTone?.luminance(base) ?? base
         // Retain scene-linear chromaticity until the final output luminance is
         // known. An earlier gamut fit near white irreversibly desaturates color.
         return fitGamut(red: red, green: green, blue: blue, luminance: luminance, output: output)
