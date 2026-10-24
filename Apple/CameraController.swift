@@ -42,6 +42,9 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var rawProbeReport: String?
     @Published var isCapturingBurst = false
     @Published var diagnosticNote = ""
+    @Published var focusHint = ""
+    @Published var lastPhotoThumbnail: UIImage?
+    private(set) var lastPhotoData: Data?
 
     let session = AVCaptureSession()
 
@@ -52,6 +55,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var latestPreview: BurstPreviewSample?
     private var burstPreview: BurstPreviewSample?
     private var lastPreviewSampleTime: CFAbsoluteTime = 0
+    private var focusGeneration = UUID()
+    private var focusRequestedAt: CFAbsoluteTime = 0
     private let sessionQueue = DispatchQueue(label: "dev.lucas.burstlab.session")
     private let processingQueue = DispatchQueue(label: "dev.lucas.burstlab.processing", qos: .userInitiated)
     private let burstLog = Logger(subsystem: "dev.lucas.burstlab", category: "burst")
@@ -149,6 +154,54 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         }
     }
 
+    func focus(at point: CGPoint, completion: @escaping (Bool) -> Void) {
+        sessionQueue.async {
+            guard self.configured, self.session.isRunning, !self.burstActive, !self.processingActive,
+                  !self.probeActive, !self.singleCaptureActive, point.x.isFinite, point.y.isFinite,
+                  (0...1).contains(point.x), (0...1).contains(point.y),
+                  let device = self.photoDevice, device.isFocusPointOfInterestSupported,
+                  device.isFocusModeSupported(.continuousAutoFocus) else {
+                DispatchQueue.main.async { completion(false) }; return
+            }
+            do {
+                try device.lockForConfiguration()
+                device.focusPointOfInterest = point
+                device.focusMode = .continuousAutoFocus
+                if device.isExposurePointOfInterestSupported, device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposurePointOfInterest = point
+                    device.exposureMode = .continuousAutoExposure
+                }
+                device.unlockForConfiguration()
+                self.focusGeneration = UUID()
+                self.focusRequestedAt = CFAbsoluteTimeGetCurrent()
+                self.latestPreview = nil
+                let generation = self.focusGeneration
+                DispatchQueue.main.async { self.focusHint = "Ajustando foco e luz…" }
+                self.waitForFocus(generation: generation, polls: 0, completion: completion)
+            } catch {
+                DispatchQueue.main.async { self.focusHint = "Nao foi possivel ajustar o foco."; completion(false) }
+            }
+        }
+    }
+
+    private func waitForFocus(generation: UUID, polls: Int, completion: @escaping (Bool) -> Void) {
+        guard generation == focusGeneration, let device = photoDevice else {
+            DispatchQueue.main.async { completion(false) }; return
+        }
+        let settling = polls < 2 || device.isAdjustingFocus || device.isAdjustingExposure
+        if settling, polls < 25 {
+            sessionQueue.asyncAfter(deadline: .now() + 0.1) {
+                self.waitForFocus(generation: generation, polls: polls + 1, completion: completion)
+            }
+            return
+        }
+        let settled = !settling
+        DispatchQueue.main.async {
+            self.focusHint = settled ? "Ponto de foco definido" : "Pouca luz para confirmar o foco"
+            completion(settled)
+        }
+    }
+
     private func configureIfNeeded() {
         guard !configured else { return }
         session.beginConfiguration()
@@ -185,7 +238,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     }
 
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
-        guard !burstActive, !processingActive, !probeActive, !singleCaptureActive,
+        guard (!burstActive || burstPlan == nil), !processingActive, !probeActive, !singleCaptureActive,
               CFAbsoluteTimeGetCurrent() - lastPreviewSampleTime >= 0.25,
               let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         // Reject a queued video frame from before a session interruption.
@@ -424,9 +477,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             let rawFormat = kCVPixelFormatType_14Bayer_RGGB
             guard self.photoDevice != nil else { return }
             self.burstConfig = BurstConfig.defaults(for: mode)
-            self.burstPreview = self.latestPreview.flatMap {
-                CFAbsoluteTimeGetCurrent() - $0.timestamp <= 0.75 ? $0 : nil
-            }
+            self.burstPreview = nil
             self.burstActive = true
             self.burstGeneration = UUID()
             let generation = self.burstGeneration
@@ -469,7 +520,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
 
     private func prepareBurstExposure(generation: UUID, polls: Int = 0) {
         guard burstActive, burstGeneration == generation, let device = photoDevice else { return }
-        if burstConfig.mode != .photo && (device.isAdjustingExposure || device.isAdjustingFocus || device.isAdjustingWhiteBalance) {
+        let afterTap = CFAbsoluteTimeGetCurrent() - focusRequestedAt < 3
+        let tapSettling = afterTap && (CFAbsoluteTimeGetCurrent() - focusRequestedAt < 0.25 || device.isAdjustingExposure)
+        if device.isAdjustingFocus || tapSettling ||
+           (burstConfig.mode != .photo && (device.isAdjustingExposure || device.isAdjustingWhiteBalance)) {
             guard polls < 30 else {
                 abortBurst("A camera nao estabilizou foco/exposicao. Aponte para uma area com contraste e tente novamente.")
                 return
@@ -490,6 +544,10 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         if burstConfig.mode != .photo && !device.isExposureModeSupported(.custom) {
             abortBurst("Este formato nao permite controlar a exposicao para o modo de tripe.")
             return
+        }
+        burstPreview = latestPreview.flatMap {
+            let age = CFAbsoluteTimeGetCurrent() - $0.timestamp
+            return age >= 0 && age <= 0.75 && $0.timestamp >= focusRequestedAt ? $0 : nil
         }
         burstPlan = plan
         sessionQueue.asyncAfter(deadline: .now() + plan.timeoutSeconds) {
@@ -856,6 +914,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
         requests = requests.filter { $0.value != .burst }
         burstFrames.removeAll()
         burstReferenceDNG = nil
+        burstPreview = nil
         restoreCameraModes()
         DispatchQueue.main.async {
             self.isCapturingBurst = false
@@ -890,6 +949,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                 self.completeBurstProcessing()
                 DispatchQueue.main.async {
                 if success {
+                    self.lastPhotoData = result.jpegData
+                    self.lastPhotoThumbnail = UIImage(data: result.jpegData)?.preparingThumbnail(of: CGSize(width: 180, height: 180))
                     self.status = "Burst pronto"
                     self.lastCaptureNote = String(
                         format: "Burst %d frames %dx%d: %.1f MB | proc %.1fs | WB R %.2f | exp %.2f | desloc %@",
@@ -980,6 +1041,8 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             } completionHandler: { success, error in
                 DispatchQueue.main.async {
                     if success {
+                        self.lastPhotoData = data
+                        self.lastPhotoThumbnail = UIImage(data: data)?.preparingThumbnail(of: CGSize(width: 180, height: 180))
                         self.lastCaptureNote = String(format: "Capturada: %.1f MB", megabytes)
                     } else {
                         self.lastCaptureNote = "Falha ao salvar: \(error?.localizedDescription ?? "desconhecida")"
