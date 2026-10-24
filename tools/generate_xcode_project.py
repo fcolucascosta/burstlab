@@ -24,6 +24,7 @@ SOURCES = [
     "Shared/BurstHDR.swift",
     "Shared/BurstFrameFreshness.swift",
     "Shared/BurstPreviewTone.swift",
+    "Shared/BurstDiagnosticStorage.swift",
 ]
 
 

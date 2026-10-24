@@ -23,9 +23,12 @@ enum BurstDiagnostics {
                      frameHashes: [String], duplicateRejections: Int) throws -> URL {
         let documents = try FileManager.default.url(for: .documentDirectory,
                                                    in: .userDomainMask, appropriateFor: nil, create: true)
-        let directory = documents.appendingPathComponent("Ensaios", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let storage = BurstDiagnosticStorage(documents: documents)
+        let expected = frames.reduce(Int64(0)) { $0 + Int64($1.data.count) }
+            + Int64(referenceDNG?.count ?? 0) + Int64(preview?.rgba.count ?? 0) + 2 * 1024 * 1024
+        let directory = try storage.beginExport(expectedBytes: expected)
+        var complete = false
+        defer { if !complete { try? FileManager.default.removeItem(at: directory) } }
         var entries: [[String: Any]] = []
         for (index, frame) in frames.enumerated() {
             let name = String(format: "frame-%02d.raw16", index)
@@ -82,6 +85,8 @@ enum BurstDiagnostics {
         let json = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         // A manifest is written last, so interrupted exports are identifiable.
         try json.write(to: directory.appendingPathComponent("manifest.json"), options: .atomic)
+        try storage.finishExport(directory)
+        complete = true
         return directory
     }
 }

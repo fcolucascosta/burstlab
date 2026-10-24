@@ -6,7 +6,8 @@ struct ContentView: View {
     @State private var showReport = false
     @State private var showPhoto = false
     @AppStorage("showGrid") private var showGrid = false
-    @AppStorage("recordDiagnostics") private var recordDiagnostics = false
+    @State private var recordDiagnostics = false
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage("captureMode") private var captureMode = CaptureMode.photo.rawValue
 
     private var selectedMode: CaptureMode { CaptureMode(rawValue: captureMode) ?? .photo }
@@ -39,13 +40,19 @@ struct ContentView: View {
         .preferredColorScheme(.dark)
         .onAppear { camera.start() }
         .onDisappear { camera.stop() }
+        .onChange(of: scenePhase) { phase in
+            if phase == .active { camera.refreshDiagnosticStorage() }
+            else { recordDiagnostics = false }
+        }
         .sheet(isPresented: $showReport) {
             CapabilityReportView(capabilities: camera.capabilities, rawProbe: camera.rawProbeReport,
                                  fallback: camera.status, diagnosticNote: camera.diagnosticNote,
                                  captureNote: camera.lastCaptureNote,
                                  appleRawStatus: camera.appleRawStatus, appleRawData: camera.appleRawReferenceData,
+                                 diagnosticBytes: camera.diagnosticBytes,
                                  recordDiagnostics: $recordDiagnostics, canProbe: !busy,
-                                 onProbe: { camera.probeRawBurst() }, onAppleRAW: { camera.compareAppleRAW() })
+                                 onProbe: { camera.probeRawBurst() }, onAppleRAW: { camera.compareAppleRAW() },
+                                 onClearRAW: { camera.refreshDiagnosticStorage(removeAll: true) })
         }
         .sheet(isPresented: $showPhoto) {
             CapturedPhotoView(data: camera.lastPhotoData)
@@ -110,7 +117,9 @@ struct ContentView: View {
                 Spacer()
                 Button {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    camera.captureBurst(mode: selectedMode, recordDiagnostics: recordDiagnostics)
+                    let saveRAW = recordDiagnostics
+                    recordDiagnostics = false
+                    camera.captureBurst(mode: selectedMode, recordDiagnostics: saveRAW)
                 } label: {
                     ZStack {
                         Circle().stroke(.white.opacity(busy ? 0.4 : 1), lineWidth: 3).frame(width: 78, height: 78)
@@ -185,10 +194,12 @@ struct CapabilityReportView: View {
     let captureNote: String
     let appleRawStatus: String
     let appleRawData: Data?
+    let diagnosticBytes: Int64
     @Binding var recordDiagnostics: Bool
     let canProbe: Bool
     let onProbe: () -> Void
     let onAppleRAW: () -> Void
+    let onClearRAW: () -> Void
     @State private var showAppleRAW = false
 
     private var reportText: String {
@@ -208,9 +219,13 @@ struct CapabilityReportView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    Toggle("Guardar RAWs para comparacao", isOn: $recordDiagnostics)
-                    Text("Opcional: guarda cerca de 220 MB em Foto ou 420 MB em Noite/Longa em Arquivos > No Meu iPhone > BurstLab > Ensaios. A foto continua sendo salva na fototeca. Apague os ensaios depois de copiar para o computador.")
+                    Toggle("Guardar RAWs so da proxima foto", isOn: $recordDiagnostics)
+                    Text("Uso normal guarda apenas a foto final. O diagnostico desliga depois de uma captura, substitui o ensaio anterior e ocupa no maximo 512 MB. Expira em 24 horas; a limpeza ocorre ao abrir o app. As fotos da fototeca sao preservadas.")
                         .font(.caption)
+                    Text("RAWs de diagnostico: \(ByteCountFormatter.string(fromByteCount: diagnosticBytes, countStyle: .file))")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Button("Apagar RAWs de diagnostico", role: .destructive, action: onClearRAW)
+                        .disabled(!canProbe || diagnosticBytes == 0)
                     Button("Sonda de diagnostico RAW", action: onProbe).disabled(!canProbe)
                     Divider()
                     Text("Laboratorio").font(.headline).frame(maxWidth: .infinity, alignment: .leading)

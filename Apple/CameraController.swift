@@ -42,6 +42,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     @Published var rawProbeReport: String?
     @Published var isCapturingBurst = false
     @Published var diagnosticNote = ""
+    @Published var diagnosticBytes: Int64 = 0
     @Published var focusHint = ""
     @Published var lastPhotoThumbnail: UIImage?
     private(set) var lastPhotoData: Data?
@@ -105,6 +106,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
     private var rotationCoordinatorStorage: Any?
 
     func start() {
+        refreshDiagnosticStorage()
         #if targetEnvironment(simulator)
         status = "Simulador sem camera. Rode no iPhone fisico."
         #else
@@ -145,6 +147,28 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
             }
         }
         DispatchQueue.main.async { UIApplication.shared.isIdleTimerDisabled = false }
+    }
+
+    func refreshDiagnosticStorage(removeAll: Bool = false) {
+        processingQueue.async {
+            do {
+                let documents = try FileManager.default.url(for: .documentDirectory, in: .userDomainMask,
+                                                           appropriateFor: nil, create: true)
+                let storage = BurstDiagnosticStorage(documents: documents)
+                if removeAll { try storage.removeAll() } else { try storage.prune() }
+                let bytes = try storage.usageBytes()
+                DispatchQueue.main.async {
+                    self.diagnosticBytes = bytes
+                    if removeAll {
+                        self.diagnosticNote = "RAWs de diagnostico apagados."
+                        self.appleRawReferenceData = nil
+                        self.appleRawStatus = ""
+                    }
+                }
+            } catch {
+                DispatchQueue.main.async { self.diagnosticNote = "Falha na limpeza dos RAWs: \(error.localizedDescription)" }
+            }
+        }
     }
 
     func capturePhoto() {
@@ -922,7 +946,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                                                               frameHashes: frameHashes, duplicateRejections: duplicateRejections)
                     diagnosticDirectory = directory
                     DispatchQueue.main.async {
-                        self.diagnosticNote = "Ensaio salvo em Arquivos > BurstLab > Ensaios > \(directory.lastPathComponent)."
+                        self.diagnosticNote = "Um ensaio guardado por ate 24 horas. A proxima captura normal nao guarda RAWs."
                     }
                 } catch {
                     DispatchQueue.main.async { self.diagnosticNote = "Falha ao salvar ensaio: \(error.localizedDescription)" }
@@ -956,6 +980,7 @@ final class CameraController: NSObject, ObservableObject, AVCapturePhotoCaptureD
                     self.lastCaptureNote = "Erro: \(error.localizedDescription)"
                 }
             }
+            self.refreshDiagnosticStorage()
         }
     }
 
